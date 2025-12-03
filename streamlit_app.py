@@ -73,7 +73,13 @@ def init_db():
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, category TEXT, amount REAL, date TEXT, description TEXT, FOREIGN KEY(user_id) REFERENCES users(id))''')
-        c.execute('''CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, category TEXT, amount REAL, FOREIGN KEY(user_id) REFERENCES users(id))''')
+        c.execute('''CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, category TEXT, amount REAL, period TEXT DEFAULT 'Monthly', FOREIGN KEY(user_id) REFERENCES users(id))''')
+        
+        # Migration to add period column if it doesn't exist (for existing databases)
+        try:
+            c.execute("ALTER TABLE goals ADD COLUMN period TEXT DEFAULT 'Monthly'")
+        except:
+            pass # Column likely exists
         conn.commit()
 
 def make_hash(password):
@@ -135,20 +141,27 @@ def get_user_data(user_id):
         df = df.dropna(subset=['date']) 
     return df
 
-def set_goal(user_id, category, amount):
+def get_user_categories(user_id):
+    """Fetches all unique categories used by the user in transactions."""
+    with sqlite3.connect(DB_FILE) as conn:
+        df = pd.read_sql_query("SELECT DISTINCT category FROM transactions WHERE user_id = ?", conn, params=(user_id,))
+    return df['category'].tolist() if not df.empty else []
+
+def set_goal(user_id, category, amount, period):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT id FROM goals WHERE user_id = ? AND category = ?", (user_id, category))
         data = c.fetchone()
         if data:
-            c.execute("UPDATE goals SET amount = ? WHERE id = ?", (amount, data[0]))
+            c.execute("UPDATE goals SET amount = ?, period = ? WHERE id = ?", (amount, period, data[0]))
         else:
-            c.execute("INSERT INTO goals (user_id, category, amount) VALUES (?, ?, ?)", (user_id, category, amount))
+            c.execute("INSERT INTO goals (user_id, category, amount, period) VALUES (?, ?, ?, ?)", (user_id, category, amount, period))
         conn.commit()
 
 def get_goals(user_id):
     with sqlite3.connect(DB_FILE) as conn:
-        return pd.read_sql_query("SELECT category, amount FROM goals WHERE user_id = ?", conn, params=(user_id,))
+        # Select period as well
+        return pd.read_sql_query("SELECT category, amount, period FROM goals WHERE user_id = ?", conn, params=(user_id,))
 
 init_db()
 
@@ -190,6 +203,9 @@ else:
     df = get_user_data(st.session_state.user_id)
     goals_df = get_goals(st.session_state.user_id)
     
+    # Get user's custom categories from DB
+    user_cats = get_user_categories(st.session_state.user_id)
+    
     if df.empty:
         total_inc, total_exp, total_sav, current_bal = 0.0, 0.0, 0.0, 0.0
     else:
@@ -207,40 +223,49 @@ else:
         st.markdown("---")
         
         with st.expander("➕ New Transaction", expanded=True):
-            # Type selection outside form to enable dynamic updates
             ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Debt", "Savings"])
             
-            # Dynamic Category Logic
             if ft_type == "Income":
-                cats = ["Salary", "Freelance", "Business", "Investment", "Gift", "Other"]
+                base_cats = ["Salary", "Freelance", "Business", "Investment", "Gift", "Other"]
             elif ft_type == "Expense":
-                cats = ["Food", "Shopping", "Transport", "Entertainment", "Health", "Education", "Travel", "Personal", "Other"]
+                base_cats = ["Food", "Shopping", "Transport", "Entertainment", "Health", "Education", "Travel", "Personal", "Other"]
             elif ft_type == "Bill":
-                cats = ["Rent", "Utilities", "Internet", "Phone", "Insurance", "Subscription", "Gym", "Other"]
+                base_cats = ["Rent", "Utilities", "Internet", "Phone", "Insurance", "Subscription", "Gym", "Other"]
             elif ft_type == "Debt":
-                cats = ["Credit Card", "Loan", "Mortgage", "Other"]
+                base_cats = ["Credit Card", "Loan", "Mortgage", "Other"]
             elif ft_type == "Savings":
-                cats = ["Emergency Fund", "Retirement", "Vacation", "Home", "Car", "General"]
+                base_cats = ["Emergency Fund", "Retirement", "Vacation", "Home", "Car", "General"]
             else:
-                cats = ["General"]
+                base_cats = ["General"]
+            
+            # Merge base categories with any custom ones the user created previously
+            # We filter user_cats to only include ones that aren't already in base_cats
+            # Note: A real app might store category-to-type mapping, but here we just show all known categories + type defaults
+            
+            # Allow Custom
+            sel_cat = st.selectbox("Category", base_cats + ["Custom"])
+            if sel_cat == "Custom":
+                final_cat = st.text_input("Enter Custom Category", placeholder="e.g. Dog Grooming")
+                if not final_cat: final_cat = "Custom"
+            else:
+                final_cat = sel_cat
 
             with st.form("add_tx_form", border=False):
                 ft_desc = st.text_input("Description", placeholder="e.g. Starbucks")
-                c_amt, c_cat = st.columns([1, 1.5])
+                c_amt, c_date = st.columns(2)
                 ft_amt = c_amt.number_input("Price", min_value=0.01, step=10.0)
-                ft_cat = c_cat.selectbox("Category", cats)
-                ft_date = st.date_input("Date", datetime.today())
+                ft_date = c_date.date_input("Date", datetime.today())
                 
                 if st.form_submit_button("Add Entry", use_container_width=True):
                     if ft_type in ["Expense", "Bill", "Debt", "Savings"]:
                         if ft_amt > current_bal:
                             st.error(f"❌ Insufficient Balance! (${current_bal:,.2f})")
                         else:
-                            add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
+                            add_transaction(st.session_state.user_id, ft_type, final_cat, ft_amt, ft_date, ft_desc)
                             st.toast("Entry Added", icon="✅")
                             st.rerun()
                     else:
-                        add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
+                        add_transaction(st.session_state.user_id, ft_type, final_cat, ft_amt, ft_date, ft_desc)
                         st.toast("Income Added", icon="✅")
                         st.rerun()
 
@@ -286,13 +311,26 @@ else:
                         st.error(f"Transfer Failed: {e}")
         
         with st.expander("🎯 Set Goal", expanded=False):
+            # Combine defaults with actual used categories
+            default_goal_cats = ["Food", "Shopping", "Transport", "Entertainment", "Health", "Education", "Travel", "Personal", "Rent", "Utilities", "Internet", "Phone"]
+            # Merge and de-duplicate
+            all_available_cats = sorted(list(set(default_goal_cats + user_cats)))
+            
+            sel_g_cat = st.selectbox("Category", all_available_cats + ["Custom"], key="goal_cat_sel")
+            
+            if sel_g_cat == "Custom":
+                final_g_cat = st.text_input("Custom Goal Category", key="goal_cat_custom")
+                if not final_g_cat: final_g_cat = "Custom"
+            else:
+                final_g_cat = sel_g_cat
+
+            # New Period Selection
+            g_period = st.selectbox("Period", ["Monthly", "Daily", "Yearly"], key="goal_period")
+
             with st.form("goal_form", border=False):
-                # Combined list for Goals (Expenses + Bills)
-                goal_cats = ["Food", "Shopping", "Transport", "Entertainment", "Health", "Education", "Travel", "Personal", "Rent", "Utilities", "Internet", "Phone", "Insurance", "Subscription"]
-                g_cat = st.selectbox("Category", goal_cats)
-                g_lim = st.number_input("Monthly Limit ($)", min_value=1.0)
+                g_lim = st.number_input(f"Target Amount ({g_period})", min_value=1.0)
                 if st.form_submit_button("Save Goal", use_container_width=True):
-                    set_goal(st.session_state.user_id, g_cat, g_lim)
+                    set_goal(st.session_state.user_id, final_g_cat, g_lim, g_period)
                     st.toast("Goal Saved", icon="✅")
                     st.rerun()
         
@@ -317,11 +355,22 @@ else:
                         st.rerun()
                         
                 elif del_mode == "By Category":
-                    # Use a broad list for deletion to catch everything
-                    all_cats = ["Food", "Shopping", "Transport", "Entertainment", "Health", "Education", "Travel", "Personal", "Rent", "Utilities", "Internet", "Phone", "Insurance", "Subscription", "Salary", "Freelance", "Investment", "Credit Card", "Loan"]
-                    cat_to_del = st.selectbox("Category", all_cats)
-                    if st.form_submit_button(f"Delete All {cat_to_del}", use_container_width=True):
-                        count = delete_transactions_category(st.session_state.user_id, cat_to_del)
+                    # Use the combined list here too
+                    all_del_cats = sorted(list(set(["All"] + user_cats + default_goal_cats)))
+                    # Moving selectbox outside form for custom logic
+                    pass
+            
+            if del_mode == "By Category":
+                all_del_cats = sorted(list(set(user_cats + ["Food", "Rent", "Transport", "Shopping"]))) # Basic fallback
+                sel_del_cat = st.selectbox("Category to Delete", all_del_cats + ["Custom"])
+                if sel_del_cat == "Custom":
+                    final_del_cat = st.text_input("Type Category to Delete")
+                else:
+                    final_del_cat = sel_del_cat
+                
+                if st.button("Delete All in Category", use_container_width=True):
+                    if final_del_cat:
+                        count = delete_transactions_category(st.session_state.user_id, final_del_cat)
                         st.toast(f"Deleted {count} records", icon="🗑️")
                         st.rerun()
 
@@ -333,7 +382,8 @@ else:
 
     if not df.empty:
         today = datetime.today()
-        goal_scale_factor = 1.0 
+        # View Duration in Days (approx)
+        view_days = 30.0 # Default
         
         if time_range == "Custom Range":
             st.markdown("###### Select Range")
@@ -345,8 +395,7 @@ else:
                 d_end = c_d2.date_input("End", today)
                 if d_start <= d_end:
                     filtered_df = df[(df['date'].dt.date >= d_start) & (df['date'].dt.date <= d_end)]
-                    days_diff = (d_end - d_start).days + 1
-                    goal_scale_factor = days_diff / 30.0
+                    view_days = (d_end - d_start).days + 1
                 else:
                     st.error("Start date must be before end date")
                     filtered_df = df
@@ -354,7 +403,7 @@ else:
             elif cr_type == "Specific Day":
                 sel_day = st.date_input("Select Day", today)
                 filtered_df = df[df['date'].dt.date == sel_day]
-                goal_scale_factor = 1/30.0
+                view_days = 1.0
                 
             elif cr_type == "Specific Month":
                 c_m1, c_m2 = st.columns(2)
@@ -363,35 +412,35 @@ else:
                 sel_month_name = c_m2.selectbox("Month", months_list, index=today.month-1)
                 sel_month = months_list.index(sel_month_name) + 1
                 filtered_df = df[(df['date'].dt.year == sel_year) & (df['date'].dt.month == sel_month)]
-                goal_scale_factor = 1.0
+                view_days = 30.0
                 
             elif cr_type == "Specific Year":
                 sel_year_only = st.number_input("Select Year", 2000, 2100, today.year)
                 filtered_df = df[df['date'].dt.year == sel_year_only]
-                goal_scale_factor = 12.0
+                view_days = 365.0
 
         elif time_range == "Today":
             filtered_df = df[df['date'].dt.date == today.date()]
-            goal_scale_factor = 1/30
+            view_days = 1.0
         elif time_range == "Yesterday":
             filtered_df = df[df['date'].dt.date == (today - timedelta(days=1)).date()]
-            goal_scale_factor = 1/30
+            view_days = 1.0
         elif time_range == "This Week":
             start_week = today - timedelta(days=today.weekday())
             filtered_df = df[df['date'].dt.date >= start_week.date()]
-            goal_scale_factor = 0.25
+            view_days = 7.0
         elif time_range == "This Month":
             filtered_df = df[(df['date'].dt.month == today.month) & (df['date'].dt.year == today.year)]
-            goal_scale_factor = 1.0
+            view_days = 30.0
         elif time_range == "This Year":
             filtered_df = df[df['date'].dt.year == today.year]
-            goal_scale_factor = 12.0
+            view_days = 365.0
         else: 
             filtered_df = df
-            goal_scale_factor = 1.0 
+            view_days = 30.0 # Default for All Time scaling? or just 1.0
     else:
         filtered_df = pd.DataFrame()
-        goal_scale_factor = 1.0
+        view_days = 30.0
 
     if df.empty:
         st.info("No transactions yet. Add one from the sidebar.")
@@ -443,16 +492,27 @@ else:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if time_range == "This Month":
                         st.subheader("Monthly Goals")
-                    elif time_range == "Custom Range":
-                        st.subheader("Goals (Scaled for Range)")
                     else:
-                        st.subheader(f"Goals (Scaled for {time_range})")
+                        st.subheader(f"Goals (Scaled to View)")
                     
                     outflow_period_mask = filtered_df['type'].isin(['Expense', 'Bill', 'Debt', 'Withdrawal'])
                     
                     for _, row in goals_df.iterrows():
                         cat = row['category']
-                        limit = row['amount'] * goal_scale_factor
+                        goal_amount = row['amount']
+                        goal_period = row['period'] if 'period' in row else 'Monthly'
+                        
+                        # Normalize goal to Daily then to View
+                        if goal_period == "Daily":
+                            base_daily = goal_amount
+                        elif goal_period == "Yearly":
+                            base_daily = goal_amount / 365.0
+                        else: # Monthly
+                            base_daily = goal_amount / 30.0
+                            
+                        # Calculate Limit for the CURRENT VIEW
+                        limit = base_daily * view_days
+                        
                         spent = filtered_df[(filtered_df['category'] == cat) & outflow_period_mask]['amount'].sum()
                         
                         ratio = spent / limit if limit > 0 else 0
@@ -462,7 +522,7 @@ else:
                         elif ratio >= 0.75: bar_color = "#FFD60A"
                         else: bar_color = "#30D158"
 
-                        st.markdown(f"""<div style="margin-bottom: 5px; display: flex; justify-content: space-between; font-size: 14px; color: #A0A0A0;"><span>{cat}</span><span>${spent:,.0f} / ${limit:,.0f}</span></div><div style="background-color: #2C2C2E; border-radius: 10px; height: 8px; width: 100%;"><div style="background-color: {bar_color}; width: {pct}%; height: 100%; border-radius: 10px;"></div></div><br>""", unsafe_allow_html=True)
+                        st.markdown(f"""<div style="margin-bottom: 5px; display: flex; justify-content: space-between; font-size: 14px; color: #A0A0A0;"><span>{cat} ({goal_period} Goal)</span><span>${spent:,.0f} / ${limit:,.0f} (View)</span></div><div style="background-color: #2C2C2E; border-radius: 10px; height: 8px; width: 100%;"><div style="background-color: {bar_color}; width: {pct}%; height: 100%; border-radius: 10px;"></div></div><br>""", unsafe_allow_html=True)
         else:
             st.info(f"No records found for {time_range}.")
 
