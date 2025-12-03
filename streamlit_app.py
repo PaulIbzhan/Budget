@@ -189,6 +189,17 @@ else:
     df = get_user_data(st.session_state.user_id)
     goals_df = get_goals(st.session_state.user_id)
     
+    # CALCULATE METRICS EARLY FOR VALIDATION
+    if df.empty:
+        inc, exp, sav, bal = 0.0, 0.0, 0.0, 0.0
+        outflow_mask = pd.Series([False] * len(df))
+    else:
+        inc = df[df['type'] == 'Income']['amount'].sum()
+        outflow_mask = df['type'].isin(['Expense', 'Bill'])
+        exp = df[outflow_mask]['amount'].sum()
+        sav = df[df['type'] == 'Savings']['amount'].sum()
+        bal = inc - (exp + sav)
+    
     # --- SIDEBAR: ALL ACTIONS HERE (Fixes Overlap) ---
     with st.sidebar:
         st.markdown(f"### Hello, {st.session_state.username}")
@@ -221,11 +232,24 @@ else:
                 if st.form_submit_button("Execute", use_container_width=True):
                     # Robust Transfer Logic with Date Formatting
                     try:
-                        val = float(t_val) if t_act == "Save" else -float(t_val)
+                        val = float(t_val)
                         dt_str = datetime.now().strftime("%Y-%m-%d")
-                        add_transaction(st.session_state.user_id, "Savings", "Transfer", val, dt_str, "Quick Transfer")
-                        st.toast("Transfer Complete", icon="✅")
-                        st.rerun()
+                        
+                        if t_act == "Save":
+                            if val > bal:
+                                st.error("❌ Insufficient funds in Balance!")
+                            else:
+                                add_transaction(st.session_state.user_id, "Savings", "Transfer", val, dt_str, "Quick Transfer")
+                                st.toast("Saved to Pot", icon="✅")
+                                st.rerun()
+                        else: # Withdraw
+                            if val > sav:
+                                st.error("❌ Insufficient funds in Savings!")
+                            else:
+                                add_transaction(st.session_state.user_id, "Savings", "Transfer", -val, dt_str, "Quick Transfer")
+                                st.toast("Withdrawn to Balance", icon="✅")
+                                st.rerun()
+
                     except Exception as e:
                         st.error(f"Transfer Failed: {e}")
         
@@ -255,11 +279,7 @@ else:
     if df.empty:
         st.info("No transactions yet. Add one from the sidebar.")
     else:
-        inc = df[df['type'] == 'Income']['amount'].sum()
-        outflow_mask = df['type'].isin(['Expense', 'Bill'])
-        exp = df[outflow_mask]['amount'].sum()
-        sav = df[df['type'] == 'Savings']['amount'].sum()
-        bal = inc - (exp + sav)
+        # Metrics already calculated above
         
         # Row 1: Metrics
         k1, k2, k3, k4 = st.columns(4)
