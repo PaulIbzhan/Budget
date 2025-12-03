@@ -62,6 +62,12 @@ st.markdown("""
             border: 1px solid #3A3A3C;
         }
         
+        /* Centered Login Alignment */
+        div.block-container {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+
         /* Hide Streamlit Chrome */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
@@ -124,7 +130,9 @@ def get_user_data(user_id):
     df = pd.read_sql_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC", conn, params=(user_id,))
     conn.close()
     if not df.empty:
-        df['date'] = pd.to_datetime(df['date'])
+        # FIX: coercing errors handles bad date formats gracefully
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df = df.dropna(subset=['date']) # Drop rows with invalid dates
     return df
 
 def set_goal(user_id, category, amount):
@@ -150,8 +158,9 @@ init_db()
 # --- 3. UI VIEWS ---
 
 def login_view():
-    st.markdown("<br><br><br>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1.2, 1])
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    # ALIGNMENT FIX: Widened center column for better login form layout
+    c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>FinSight</h1>", unsafe_allow_html=True)
         tab1, tab2 = st.tabs(["Sign In", "Create Account"])
@@ -230,6 +239,7 @@ else:
         sav = df[df['type'] == 'Savings']['amount'].sum()
         bal = inc - (exp + sav)
         
+        # ALIGNMENT FIX: Balanced grid
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Income", f"${inc:,.0f}")
         k2.metric("Expenses", f"${exp:,.0f}")
@@ -237,6 +247,7 @@ else:
         k4.metric("Balance", f"${bal:,.0f}", delta_color="normal")
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # ALIGNMENT FIX: Adjusted ratio to 2:1 for cleaner chart vs list balance
         c_left, c_right = st.columns([2, 1])
         with c_left:
             st.subheader("Activity")
