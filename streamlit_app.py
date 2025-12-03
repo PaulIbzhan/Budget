@@ -121,6 +121,7 @@ def delete_transaction(tx_id):
 
 def get_user_data(user_id):
     with sqlite3.connect(DB_FILE) as conn:
+        # Sort by Date DESC, then ID DESC to ensure newest added are always top
         df = pd.read_sql_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, id DESC", conn, params=(user_id,))
     
     if not df.empty:
@@ -233,8 +234,10 @@ else:
         # Action 2: Quick Transfer
         with st.expander("🔁 Quick Transfer", expanded=False):
             with st.form("quick_transfer", border=False):
-                st.caption("Move money between Savings and Balance")
-                t_act = st.selectbox("Action", ["Save", "Cash Out"], label_visibility="collapsed")
+                st.caption("Manage Funds")
+                # Unified Action Dropdown for clarity
+                t_act = st.selectbox("Action", ["Save to Pot", "Withdraw from Balance", "Withdraw from Savings"], label_visibility="collapsed")
+                
                 col_t1, col_t2 = st.columns(2)
                 t_val = col_t1.number_input("Amt", min_value=1.0, label_visibility="collapsed")
                 t_date = col_t2.date_input("Date", datetime.today(), label_visibility="collapsed")
@@ -244,20 +247,33 @@ else:
                         val = float(t_val)
                         dt_str = t_date.strftime("%Y-%m-%d")
                         
-                        if t_act == "Save":
+                        if t_act == "Save to Pot":
                             if val > current_bal:
-                                st.error(f"❌ Insufficient Funds! (${current_bal:,.2f})")
+                                st.error(f"❌ Insufficient Balance! (${current_bal:,.2f})")
                             else:
                                 add_transaction(st.session_state.user_id, "Savings", "Transfer", val, dt_str, "Manual Save")
                                 st.toast("Saved to Pot", icon="✅")
                                 st.rerun()
-                        else: # Cash Out
+                                
+                        elif t_act == "Withdraw from Balance":
+                            # Standard Expense
                             if val > current_bal:
-                                st.error(f"❌ Insufficient Funds! (${current_bal:,.2f})")
+                                st.error(f"❌ Insufficient Balance! (${current_bal:,.2f})")
                             else:
                                 add_transaction(st.session_state.user_id, "Withdrawal", "Cash", val, dt_str, "Cash Withdrawal")
                                 st.toast("Withdrawn from Balance", icon="✅")
                                 st.rerun()
+                                
+                        elif t_act == "Withdraw from Savings":
+                            # Liquidate: Savings -> Balance
+                            if val > total_sav:
+                                st.error(f"❌ Insufficient Savings! (${total_sav:,.2f})")
+                            else:
+                                # Negative savings adds to balance
+                                add_transaction(st.session_state.user_id, "Savings", "Transfer", -val, dt_str, "Withdraw from Savings")
+                                st.toast("Moved to Balance", icon="✅")
+                                st.rerun()
+                                
                     except Exception as e:
                         st.error(f"Transfer Failed: {e}")
         
@@ -285,17 +301,50 @@ else:
     c_title, c_filter = st.columns([3, 1])
     with c_title:
         st.title("Overview")
-        # st.markdown(f"<div style='color: #86868B; margin-top: -15px; margin-bottom: 20px;'>{datetime.today().strftime('%B %d, %Y')}</div>", unsafe_allow_html=True)
     with c_filter:
         time_range = st.selectbox("Time Period", ["This Month", "All Time", "Today", "Yesterday", "This Week", "This Year", "Custom Range"], label_visibility="collapsed")
 
     # Apply Filter Logic
     if not df.empty:
         today = datetime.today()
-        # Factor used to scale goals (e.g. if viewing year, multiply monthly goal by 12)
         goal_scale_factor = 1.0 
         
-        if time_range == "Today":
+        if time_range == "Custom Range":
+            st.markdown("###### Select Range")
+            cr_type = st.selectbox("Type", ["Date Range", "Specific Day", "Specific Month", "Specific Year"], label_visibility="collapsed")
+            
+            if cr_type == "Date Range":
+                c_d1, c_d2 = st.columns(2)
+                d_start = c_d1.date_input("Start", today - timedelta(days=30))
+                d_end = c_d2.date_input("End", today)
+                if d_start <= d_end:
+                    filtered_df = df[(df['date'].dt.date >= d_start) & (df['date'].dt.date <= d_end)]
+                    days_diff = (d_end - d_start).days + 1
+                    goal_scale_factor = days_diff / 30.0
+                else:
+                    st.error("Start date must be before end date")
+                    filtered_df = df
+            
+            elif cr_type == "Specific Day":
+                sel_day = st.date_input("Select Day", today)
+                filtered_df = df[df['date'].dt.date == sel_day]
+                goal_scale_factor = 1/30.0
+                
+            elif cr_type == "Specific Month":
+                c_m1, c_m2 = st.columns(2)
+                sel_year = c_m1.number_input("Year", 2000, 2100, today.year)
+                months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+                sel_month_name = c_m2.selectbox("Month", months_list, index=today.month-1)
+                sel_month = months_list.index(sel_month_name) + 1
+                filtered_df = df[(df['date'].dt.year == sel_year) & (df['date'].dt.month == sel_month)]
+                goal_scale_factor = 1.0
+                
+            elif cr_type == "Specific Year":
+                sel_year_only = st.number_input("Select Year", 2000, 2100, today.year)
+                filtered_df = df[df['date'].dt.year == sel_year_only]
+                goal_scale_factor = 12.0
+
+        elif time_range == "Today":
             filtered_df = df[df['date'].dt.date == today.date()]
             goal_scale_factor = 1/30
         elif time_range == "Yesterday":
@@ -304,29 +353,16 @@ else:
         elif time_range == "This Week":
             start_week = today - timedelta(days=today.weekday())
             filtered_df = df[df['date'].dt.date >= start_week.date()]
-            goal_scale_factor = 0.25 # Approx 1 week out of 4
+            goal_scale_factor = 0.25
         elif time_range == "This Month":
             filtered_df = df[(df['date'].dt.month == today.month) & (df['date'].dt.year == today.year)]
             goal_scale_factor = 1.0
         elif time_range == "This Year":
             filtered_df = df[df['date'].dt.year == today.year]
             goal_scale_factor = 12.0
-        elif time_range == "Custom Range":
-            # Show Date Range Picker
-            c_d1, c_d2 = st.columns(2)
-            d_start = c_d1.date_input("Start", today - timedelta(days=30))
-            d_end = c_d2.date_input("End", today)
-            if d_start <= d_end:
-                filtered_df = df[(df['date'].dt.date >= d_start) & (df['date'].dt.date <= d_end)]
-                # Calculate scale based on number of days
-                days_diff = (d_end - d_start).days + 1
-                goal_scale_factor = days_diff / 30.0
-            else:
-                st.error("End date must be after start date.")
-                filtered_df = df
-        else:
+        else: # All Time
             filtered_df = df
-            goal_scale_factor = 1.0 # All Time - difficult to scale, keeping 1.0 or separate logic
+            goal_scale_factor = 1.0 
     else:
         filtered_df = pd.DataFrame()
         goal_scale_factor = 1.0
@@ -355,7 +391,7 @@ else:
             with c_left:
                 st.subheader("Activity")
                 chart_df = filtered_df.copy()
-                if time_range in ["Today", "Yesterday"]:
+                if time_range in ["Today", "Yesterday", "Specific Day"]:
                     trend = chart_df.groupby(['type'])['amount'].sum().reset_index()
                     fig = px.bar(trend, x='type', y='amount', color='type', 
                                  color_discrete_map={'Income': '#30D158', 'Expense': '#FF453A', 'Withdrawal': '#FF9F0A', 'Savings': '#0A84FF'})
@@ -383,18 +419,16 @@ else:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if time_range == "This Month":
                         st.subheader("Monthly Goals")
+                    elif time_range == "Custom Range":
+                        st.subheader("Goals (Scaled for Range)")
                     else:
                         st.subheader(f"Goals (Scaled for {time_range})")
                     
-                    # Filter data for goals based on selected range
                     outflow_period_mask = filtered_df['type'].isin(['Expense', 'Bill', 'Debt', 'Withdrawal'])
                     
                     for _, row in goals_df.iterrows():
                         cat = row['category']
-                        # Scale the monthly limit based on the time range selected
                         limit = row['amount'] * goal_scale_factor
-                        
-                        # Calculate spend ONLY for the filtered period
                         spent = filtered_df[(filtered_df['category'] == cat) & outflow_period_mask]['amount'].sum()
                         
                         ratio = spent / limit if limit > 0 else 0
@@ -412,7 +446,6 @@ else:
         st.markdown("---")
         st.subheader("All Transactions")
         
-        # Displaying ALL filtered rows, no .head(10) restriction
         if not filtered_df.empty:
             grid_df = filtered_df[['id', 'date', 'description', 'category', 'amount', 'type']]
             st.dataframe(
@@ -425,7 +458,7 @@ else:
                     "type": st.column_config.TextColumn("Type"),
                 },
                 use_container_width=True,
-                height=400 # Fixed height with scrollbar
+                height=400 
             )
         else:
             st.caption("No transactions available.")
