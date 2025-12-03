@@ -5,27 +5,22 @@ import sqlite3
 import hashlib
 from datetime import datetime, timedelta
 
-# --- 1. SETUP & APPLE-STYLE DARK MODE CSS ---
 try:
     st.set_page_config(page_title="FinSight", page_icon="", layout="wide", initial_sidebar_state="expanded")
 except AttributeError:
     pass
 
-# Custom CSS for Apple Dark Mode Feel
 st.markdown("""
     <style>
-        /* FORCE DARK MODE VISUALS */
         .stApp {
             background-color: #0E1117 !important;
         }
         
-        /* Sidebar */
         section[data-testid="stSidebar"] {
             background-color: #151920 !important;
             border-right: 1px solid #2B2B2B;
         }
         
-        /* Force Text Colors to White/Light Grey */
         h1, h2, h3, h4, h5, h6, p, span, div {
             color: #FAFAFA !important;
         }
@@ -36,7 +31,6 @@ st.markdown("""
             color: #FFFFFF !important;
         }
         
-        /* Cards (Metrics, Charts, Forms) */
         div[data-testid="stMetric"], div.stDataFrame, div.stPlotlyChart, div[data-testid="stForm"] {
             background-color: #1E1E1E !important;
             border-radius: 18px;
@@ -45,7 +39,6 @@ st.markdown("""
             border: 1px solid #2B2B2B;
         }
         
-        /* Buttons - Apple Blue Pills */
         div.stButton > button {
             background-color: #0A84FF !important;
             color: white !important;
@@ -55,20 +48,17 @@ st.markdown("""
             font-weight: 500 !important;
         }
         
-        /* Inputs */
         .stTextInput > div > div > input, .stNumberInput > div > div > input, .stSelectbox > div > div {
             background-color: #2C2C2E !important;
             color: #FFFFFF !important;
             border: 1px solid #3A3A3C;
         }
         
-        /* Centered Login Alignment */
         div.block-container {
             padding-top: 2rem;
             padding-bottom: 2rem;
         }
         
-        /* Restore Streamlit Menu (Hamburger) */
         #MainMenu {visibility: visible;}
         footer {visibility: hidden;}
         header {visibility: visible !important;} 
@@ -78,7 +68,6 @@ st.markdown("""
 
 DB_FILE = 'budget_v3.db'
 
-# --- 2. DATABASE FUNCTIONS ---
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -122,7 +111,6 @@ def delete_transaction(tx_id):
 def delete_transactions_range(user_id, start_date, end_date):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        # Ensure dates are strings for comparison if stored as strings
         s_str = str(start_date)
         e_str = str(end_date)
         c.execute("DELETE FROM transactions WHERE user_id = ? AND date BETWEEN ? AND ?", (user_id, s_str, e_str))
@@ -140,7 +128,6 @@ def delete_transactions_category(user_id, category):
 
 def get_user_data(user_id):
     with sqlite3.connect(DB_FILE) as conn:
-        # Sort by Date DESC, then ID DESC to ensure newest added are always top
         df = pd.read_sql_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, id DESC", conn, params=(user_id,))
     
     if not df.empty:
@@ -164,8 +151,6 @@ def get_goals(user_id):
         return pd.read_sql_query("SELECT category, amount FROM goals WHERE user_id = ?", conn, params=(user_id,))
 
 init_db()
-
-# --- 3. UI VIEWS ---
 
 def login_view():
     st.markdown("<br><br>", unsafe_allow_html=True)
@@ -197,18 +182,14 @@ def login_view():
                     else:
                         st.error("Username unavailable.")
 
-# --- 4. MAIN APP ---
-
 if 'user_id' not in st.session_state: st.session_state.user_id = None
 
 if st.session_state.user_id is None:
     login_view()
 else:
-    # --- LOAD DATA ---
     df = get_user_data(st.session_state.user_id)
     goals_df = get_goals(st.session_state.user_id)
     
-    # --- CALCULATIONS ---
     if df.empty:
         total_inc, total_exp, total_sav, current_bal = 0.0, 0.0, 0.0, 0.0
     else:
@@ -218,7 +199,6 @@ else:
         total_sav = df[df['type'] == 'Savings']['amount'].sum()
         current_bal = total_inc - (total_exp + total_sav)
     
-    # --- SIDEBAR ACTIONS ---
     with st.sidebar:
         st.markdown(f"### Hello, {st.session_state.username}")
         if st.button("Sign Out", key="logout"):
@@ -226,16 +206,30 @@ else:
             st.rerun()
         st.markdown("---")
         
-        # Action 1: Add Transaction
         with st.expander("➕ New Transaction", expanded=True):
+            # Type selection outside form to enable dynamic updates
+            ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Debt", "Savings"])
+            
+            # Dynamic Category Logic
+            if ft_type == "Income":
+                cats = ["Salary", "Freelance", "Business", "Investment", "Gift", "Other"]
+            elif ft_type == "Expense":
+                cats = ["Food", "Shopping", "Transport", "Entertainment", "Health", "Education", "Travel", "Personal", "Other"]
+            elif ft_type == "Bill":
+                cats = ["Rent", "Utilities", "Internet", "Phone", "Insurance", "Subscription", "Gym", "Other"]
+            elif ft_type == "Debt":
+                cats = ["Credit Card", "Loan", "Mortgage", "Other"]
+            elif ft_type == "Savings":
+                cats = ["Emergency Fund", "Retirement", "Vacation", "Home", "Car", "General"]
+            else:
+                cats = ["General"]
+
             with st.form("add_tx_form", border=False):
-                ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Debt", "Savings"], label_visibility="collapsed")
                 ft_desc = st.text_input("Description", placeholder="e.g. Starbucks")
                 c_amt, c_cat = st.columns([1, 1.5])
-                ft_amt = c_amt.number_input("Price", min_value=0.01, step=10.0, label_visibility="collapsed")
-                cats = ["Food", "Rent", "Transport", "Shopping", "Entertainment", "Health", "Salary", "Invest", "Loan"]
-                ft_cat = c_cat.selectbox("Category", cats, label_visibility="collapsed")
-                ft_date = st.date_input("Date", datetime.today(), label_visibility="collapsed")
+                ft_amt = c_amt.number_input("Price", min_value=0.01, step=10.0)
+                ft_cat = c_cat.selectbox("Category", cats)
+                ft_date = st.date_input("Date", datetime.today())
                 
                 if st.form_submit_button("Add Entry", use_container_width=True):
                     if ft_type in ["Expense", "Bill", "Debt", "Savings"]:
@@ -250,7 +244,6 @@ else:
                         st.toast("Income Added", icon="✅")
                         st.rerun()
 
-        # Action 2: Quick Transfer
         with st.expander("🔁 Quick Transfer", expanded=False):
             with st.form("quick_transfer", border=False):
                 st.caption("Manage Funds")
@@ -292,17 +285,17 @@ else:
                     except Exception as e:
                         st.error(f"Transfer Failed: {e}")
         
-        # Action 3: Set Goal
         with st.expander("🎯 Set Goal", expanded=False):
             with st.form("goal_form", border=False):
-                g_cat = st.selectbox("Category", cats)
+                # Combined list for Goals (Expenses + Bills)
+                goal_cats = ["Food", "Shopping", "Transport", "Entertainment", "Health", "Education", "Travel", "Personal", "Rent", "Utilities", "Internet", "Phone", "Insurance", "Subscription"]
+                g_cat = st.selectbox("Category", goal_cats)
                 g_lim = st.number_input("Monthly Limit ($)", min_value=1.0)
                 if st.form_submit_button("Save Goal", use_container_width=True):
                     set_goal(st.session_state.user_id, g_cat, g_lim)
                     st.toast("Goal Saved", icon="✅")
                     st.rerun()
         
-        # Action 4: Advanced Delete Data
         with st.expander("🗑️ Delete Data", expanded=False):
             del_mode = st.radio("Mode", ["Specific ID", "Date Range", "By Category"], horizontal=True, label_visibility="collapsed")
             
@@ -324,21 +317,20 @@ else:
                         st.rerun()
                         
                 elif del_mode == "By Category":
-                    cat_to_del = st.selectbox("Category", cats)
+                    # Use a broad list for deletion to catch everything
+                    all_cats = ["Food", "Shopping", "Transport", "Entertainment", "Health", "Education", "Travel", "Personal", "Rent", "Utilities", "Internet", "Phone", "Insurance", "Subscription", "Salary", "Freelance", "Investment", "Credit Card", "Loan"]
+                    cat_to_del = st.selectbox("Category", all_cats)
                     if st.form_submit_button(f"Delete All {cat_to_del}", use_container_width=True):
                         count = delete_transactions_category(st.session_state.user_id, cat_to_del)
                         st.toast(f"Deleted {count} records", icon="🗑️")
                         st.rerun()
 
-    # --- MAIN DASHBOARD ---
-    
     c_title, c_filter = st.columns([3, 1])
     with c_title:
         st.title("Overview")
     with c_filter:
         time_range = st.selectbox("Time Period", ["This Month", "All Time", "Today", "Yesterday", "This Week", "This Year", "Custom Range"], label_visibility="collapsed")
 
-    # Apply Filter Logic
     if not df.empty:
         today = datetime.today()
         goal_scale_factor = 1.0 
@@ -394,7 +386,7 @@ else:
         elif time_range == "This Year":
             filtered_df = df[df['date'].dt.year == today.year]
             goal_scale_factor = 12.0
-        else: # All Time
+        else: 
             filtered_df = df
             goal_scale_factor = 1.0 
     else:
@@ -411,7 +403,6 @@ else:
         else:
             p_inc, p_exp = 0.0, 0.0
 
-        # Row 1: Metrics
         k1, k2, k3, k4 = st.columns(4)
         k1.metric(f"Income ({time_range})", f"${p_inc:,.0f}")
         k2.metric(f"Expenses ({time_range})", f"${p_exp:,.0f}")
@@ -419,7 +410,6 @@ else:
         k4.metric("Current Balance", f"${current_bal:,.0f}", delta_color="normal")
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Row 2: Charts
         if not filtered_df.empty:
             c_left, c_right = st.columns([2, 1])
             with c_left:
@@ -476,11 +466,9 @@ else:
         else:
             st.info(f"No records found for {time_range}.")
 
-        # Row 3: Recent Transactions
         st.markdown("---")
         st.subheader("All Transactions")
         
-        # Export Button
         if not df.empty:
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("Download CSV", data=csv, file_name="budget_data.csv", mime="text/csv")
