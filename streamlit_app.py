@@ -119,6 +119,25 @@ def delete_transaction(tx_id):
         c.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
         conn.commit()
 
+def delete_transactions_range(user_id, start_date, end_date):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        # Ensure dates are strings for comparison if stored as strings
+        s_str = str(start_date)
+        e_str = str(end_date)
+        c.execute("DELETE FROM transactions WHERE user_id = ? AND date BETWEEN ? AND ?", (user_id, s_str, e_str))
+        count = c.rowcount
+        conn.commit()
+        return count
+
+def delete_transactions_category(user_id, category):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM transactions WHERE user_id = ? AND category = ?", (user_id, category))
+        count = c.rowcount
+        conn.commit()
+        return count
+
 def get_user_data(user_id):
     with sqlite3.connect(DB_FILE) as conn:
         # Sort by Date DESC, then ID DESC to ensure newest added are always top
@@ -235,7 +254,6 @@ else:
         with st.expander("🔁 Quick Transfer", expanded=False):
             with st.form("quick_transfer", border=False):
                 st.caption("Manage Funds")
-                # Unified Action Dropdown for clarity
                 t_act = st.selectbox("Action", ["Save to Pot", "Withdraw from Balance", "Withdraw from Savings"], label_visibility="collapsed")
                 
                 col_t1, col_t2 = st.columns(2)
@@ -256,7 +274,6 @@ else:
                                 st.rerun()
                                 
                         elif t_act == "Withdraw from Balance":
-                            # Standard Expense
                             if val > current_bal:
                                 st.error(f"❌ Insufficient Balance! (${current_bal:,.2f})")
                             else:
@@ -265,11 +282,9 @@ else:
                                 st.rerun()
                                 
                         elif t_act == "Withdraw from Savings":
-                            # Liquidate: Savings -> Balance
                             if val > total_sav:
                                 st.error(f"❌ Insufficient Savings! (${total_sav:,.2f})")
                             else:
-                                # Negative savings adds to balance
                                 add_transaction(st.session_state.user_id, "Savings", "Transfer", -val, dt_str, "Withdraw from Savings")
                                 st.toast("Moved to Balance", icon="✅")
                                 st.rerun()
@@ -287,14 +302,33 @@ else:
                     st.toast("Goal Saved", icon="✅")
                     st.rerun()
         
-        # Action 4: Delete Data
+        # Action 4: Advanced Delete Data
         with st.expander("🗑️ Delete Data", expanded=False):
+            del_mode = st.radio("Mode", ["Specific ID", "Date Range", "By Category"], horizontal=True, label_visibility="collapsed")
+            
             with st.form("delete_form", border=False):
-                del_id = st.number_input("ID to Delete", min_value=0, step=1)
-                if st.form_submit_button("Delete", use_container_width=True):
-                    delete_transaction(del_id)
-                    st.toast("Transaction Deleted", icon="🗑️")
-                    st.rerun()
+                if del_mode == "Specific ID":
+                    del_id = st.number_input("ID to Delete", min_value=0, step=1)
+                    if st.form_submit_button("Delete ID", use_container_width=True):
+                        delete_transaction(del_id)
+                        st.toast("Deleted ID", icon="🗑️")
+                        st.rerun()
+                
+                elif del_mode == "Date Range":
+                    c_ds, c_de = st.columns(2)
+                    d_start = c_ds.date_input("Start")
+                    d_end = c_de.date_input("End")
+                    if st.form_submit_button("Delete Range", use_container_width=True):
+                        count = delete_transactions_range(st.session_state.user_id, d_start, d_end)
+                        st.toast(f"Deleted {count} records", icon="🗑️")
+                        st.rerun()
+                        
+                elif del_mode == "By Category":
+                    cat_to_del = st.selectbox("Category", cats)
+                    if st.form_submit_button(f"Delete All {cat_to_del}", use_container_width=True):
+                        count = delete_transactions_category(st.session_state.user_id, cat_to_del)
+                        st.toast(f"Deleted {count} records", icon="🗑️")
+                        st.rerun()
 
     # --- MAIN DASHBOARD ---
     
@@ -446,6 +480,11 @@ else:
         st.markdown("---")
         st.subheader("All Transactions")
         
+        # Export Button
+        if not df.empty:
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("Download CSV", data=csv, file_name="budget_data.csv", mime="text/csv")
+
         if not filtered_df.empty:
             grid_df = filtered_df[['id', 'date', 'description', 'category', 'amount', 'type']]
             st.dataframe(
