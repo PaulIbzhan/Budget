@@ -229,13 +229,16 @@ else:
         # Action 2: Quick Transfer
         with st.expander("🔁 Quick Transfer", expanded=False):
             with st.form("quick_transfer", border=False):
+                # Improved Layout: Action on top, then Amount and Date side-by-side
+                t_act = st.selectbox("Action", ["Save", "Cash Out"], label_visibility="collapsed")
                 col_t1, col_t2 = st.columns(2)
-                t_act = col_t1.selectbox("Action", ["Save", "Cash Out"], label_visibility="collapsed")
-                t_val = col_t2.number_input("Amt", min_value=1.0, label_visibility="collapsed")
+                t_val = col_t1.number_input("Amt", min_value=1.0, label_visibility="collapsed")
+                t_date = col_t2.date_input("Transfer Date", datetime.today(), label_visibility="collapsed")
+                
                 if st.form_submit_button("Execute", use_container_width=True):
                     try:
                         val = float(t_val)
-                        dt_str = datetime.now().strftime("%Y-%m-%d")
+                        dt_str = t_date.strftime("%Y-%m-%d")
                         
                         if t_act == "Save":
                             if val > current_bal:
