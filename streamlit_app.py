@@ -195,7 +195,8 @@ else:
         outflow_mask = pd.Series([False] * len(df))
     else:
         inc = df[df['type'] == 'Income']['amount'].sum()
-        outflow_mask = df['type'].isin(['Expense', 'Bill'])
+        # FIX: Include 'Debt' in outflow calculation to prevent balance mismatch
+        outflow_mask = df['type'].isin(['Expense', 'Bill', 'Debt'])
         exp = df[outflow_mask]['amount'].sum()
         sav = df[df['type'] == 'Savings']['amount'].sum()
         bal = inc - (exp + sav)
@@ -211,17 +212,29 @@ else:
         # Action 1: Add Transaction
         with st.expander("➕ New Transaction", expanded=True):
             with st.form("add_tx_form", border=False):
-                ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Savings"], label_visibility="collapsed")
+                # Added 'Debt' back to options
+                ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Debt", "Savings"], label_visibility="collapsed")
                 ft_desc = st.text_input("Description", placeholder="e.g. Starbucks")
                 c_amt, c_cat = st.columns([1, 1.5])
                 ft_amt = c_amt.number_input("Price", min_value=0.01, step=10.0, label_visibility="collapsed")
-                cats = ["Food", "Rent", "Transport", "Shopping", "Entertainment", "Health", "Salary", "Invest"]
+                cats = ["Food", "Rent", "Transport", "Shopping", "Entertainment", "Health", "Salary", "Invest", "Loan"]
                 ft_cat = c_cat.selectbox("Category", cats, label_visibility="collapsed")
                 ft_date = st.date_input("Date", datetime.today(), label_visibility="collapsed")
+                
                 if st.form_submit_button("Add Entry", use_container_width=True):
-                    add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
-                    st.toast("Entry Added", icon="✅")
-                    st.rerun()
+                    # Balance Guard: Prevent Negative Balance
+                    if ft_type in ["Expense", "Bill", "Debt", "Savings"]:
+                        if ft_amt > bal:
+                            st.error(f"❌ Insufficient Balance! (Available: ${bal:,.2f})")
+                        else:
+                            add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
+                            st.toast("Entry Added", icon="✅")
+                            st.rerun()
+                    else:
+                        # Income is always allowed
+                        add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
+                        st.toast("Income Added", icon="✅")
+                        st.rerun()
 
         # Action 2: Quick Transfer
         with st.expander("🔁 Quick Transfer", expanded=False):
@@ -237,14 +250,14 @@ else:
                         
                         if t_act == "Save":
                             if val > bal:
-                                st.error("❌ Insufficient funds in Balance!")
+                                st.error(f"❌ Insufficient funds in Balance! (Max: ${bal:,.2f})")
                             else:
                                 add_transaction(st.session_state.user_id, "Savings", "Transfer", val, dt_str, "Quick Transfer")
                                 st.toast("Saved to Pot", icon="✅")
                                 st.rerun()
                         else: # Withdraw
                             if val > sav:
-                                st.error("❌ Insufficient funds in Savings!")
+                                st.error(f"❌ Insufficient funds in Savings! (Max: ${sav:,.2f})")
                             else:
                                 add_transaction(st.session_state.user_id, "Savings", "Transfer", -val, dt_str, "Quick Transfer")
                                 st.toast("Withdrawn to Balance", icon="✅")
