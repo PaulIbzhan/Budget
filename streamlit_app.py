@@ -71,7 +71,7 @@ st.markdown("""
         /* Restore Streamlit Menu (Hamburger) */
         #MainMenu {visibility: visible;}
         footer {visibility: hidden;}
-        header {visibility: hidden;}
+        header {visibility: visible !important;} 
         
     </style>
     """, unsafe_allow_html=True)
