@@ -125,9 +125,10 @@ def get_user_data(user_id):
         df = pd.read_sql_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC", conn, params=(user_id,))
     
     if not df.empty:
-        # FIX: coercing errors handles bad date formats gracefully
+        # FIX: coercing errors handles bad date formats gracefully without dropping valid data aggressively
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        df = df.dropna(subset=['date']) # Drop rows with invalid dates
+        # We only drop if date is truly invalid (NaT)
+        df = df.dropna(subset=['date']) 
     return df
 
 def set_goal(user_id, category, amount):
@@ -186,6 +187,9 @@ if 'user_id' not in st.session_state: st.session_state.user_id = None
 if st.session_state.user_id is None:
     login_view()
 else:
+    # --- LOAD DATA (Initial Load) ---
+    # We load data here to ensure we have the latest before Sidebar logic, 
+    # but strictly speaking, st.rerun() in sidebar will cause this to re-execute with new data.
     df = get_user_data(st.session_state.user_id)
     goals_df = get_goals(st.session_state.user_id)
     
@@ -195,8 +199,7 @@ else:
         outflow_mask = pd.Series([False] * len(df))
     else:
         inc = df[df['type'] == 'Income']['amount'].sum()
-        # FIX: Include 'Debt' in outflow calculation to prevent balance mismatch
-        outflow_mask = df['type'].isin(['Expense', 'Bill', 'Debt'])
+        outflow_mask = df['type'].isin(['Expense', 'Bill', 'Debt', 'Withdrawal'])
         exp = df[outflow_mask]['amount'].sum()
         sav = df[df['type'] == 'Savings']['amount'].sum()
         bal = inc - (exp + sav)
@@ -236,31 +239,33 @@ else:
                         st.toast("Income Added", icon="✅")
                         st.rerun()
 
-        # Action 2: Quick Transfer
+        # Action 2: Quick Transfer / Withdraw
         with st.expander("🔁 Quick Transfer", expanded=False):
             with st.form("quick_transfer", border=False):
                 col_t1, col_t2 = st.columns(2)
                 t_act = col_t1.selectbox("Action", ["Save", "Withdraw"], label_visibility="collapsed")
                 t_val = col_t2.number_input("Amt", min_value=1.0, label_visibility="collapsed")
                 if st.form_submit_button("Execute", use_container_width=True):
-                    # Robust Transfer Logic with Date Formatting
                     try:
                         val = float(t_val)
                         dt_str = datetime.now().strftime("%Y-%m-%d")
                         
                         if t_act == "Save":
+                            # Move Balance -> Savings (Reduces Balance, Increases Savings)
                             if val > bal:
-                                st.error(f"❌ Insufficient funds in Balance! (Max: ${bal:,.2f})")
+                                st.error(f"❌ Insufficient funds in Balance! (Available: ${bal:,.2f})")
                             else:
-                                add_transaction(st.session_state.user_id, "Savings", "Transfer", val, dt_str, "Quick Transfer")
+                                add_transaction(st.session_state.user_id, "Savings", "Transfer", val, dt_str, "Manual Save")
                                 st.toast("Saved to Pot", icon="✅")
                                 st.rerun()
                         else: # Withdraw
-                            if val > sav:
-                                st.error(f"❌ Insufficient funds in Savings! (Max: ${sav:,.2f})")
+                            # Interpret as "Pull ONLY from Balance" -> Expense/Cash Out
+                            if val > bal:
+                                st.error(f"❌ Insufficient funds in Balance! (Available: ${bal:,.2f})")
                             else:
-                                add_transaction(st.session_state.user_id, "Savings", "Transfer", -val, dt_str, "Quick Transfer")
-                                st.toast("Withdrawn to Balance", icon="✅")
+                                # Record as 'Withdrawal' type (treated as Expense in calculations)
+                                add_transaction(st.session_state.user_id, "Withdrawal", "Cash", val, dt_str, "Cash Withdrawal")
+                                st.toast("Withdrawn from Balance", icon="✅")
                                 st.rerun()
 
                     except Exception as e:
@@ -292,8 +297,6 @@ else:
     if df.empty:
         st.info("No transactions yet. Add one from the sidebar.")
     else:
-        # Metrics already calculated above
-        
         # Row 1: Metrics
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Income", f"${inc:,.0f}")
@@ -308,10 +311,10 @@ else:
             st.subheader("Activity")
             df['month'] = df['date'].dt.strftime('%b')
             trend = df.groupby(['month', 'type'])['amount'].sum().reset_index()
-            trend = trend[trend['type'].isin(['Income', 'Expense'])]
+            trend = trend[trend['type'].isin(['Income', 'Expense', 'Withdrawal'])]
             
             fig = px.bar(trend, x='month', y='amount', color='type', barmode='group',
-                         color_discrete_map={'Income': '#30D158', 'Expense': '#FF453A'})
+                         color_discrete_map={'Income': '#30D158', 'Expense': '#FF453A', 'Withdrawal': '#FF9F0A'})
             
             fig.update_layout(
                 plot_bgcolor='#1E1E1E', 
@@ -343,7 +346,7 @@ else:
             else:
                 st.caption("No expenses.")
                 
-            # Goals moved here, cleaner look
+            # Goals
             if not goals_df.empty:
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.subheader("Goals")
@@ -373,7 +376,7 @@ else:
                         <br>
                     """, unsafe_allow_html=True)
 
-        # Row 3: Recent Transactions (Full Width to avoid overlap)
+        # Row 3: Recent Transactions
         st.markdown("---")
         st.subheader("Recent Transactions")
         # Added ID column to display so users know what to delete
