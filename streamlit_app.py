@@ -107,9 +107,11 @@ def login_user(username, password):
         return c.fetchone()
 
 def add_transaction(user_id, type_, category, amount, date, description):
+    # FIX: Explicitly convert date to string to prevent data dropping issues
+    date_str = str(date)
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute('''INSERT INTO transactions (user_id, type, category, amount, date, description) VALUES (?, ?, ?, ?, ?, ?)''', (user_id, type_, category, amount, date, description))
+        c.execute('''INSERT INTO transactions (user_id, type, category, amount, date, description) VALUES (?, ?, ?, ?, ?, ?)''', (user_id, type_, category, amount, date_str, description))
         conn.commit()
 
 def delete_transaction(tx_id):
@@ -222,7 +224,7 @@ else:
                     st.toast("Transfer Complete", icon="✅")
                     st.rerun()
         
-        # Action 3: Goals
+        # Action 3: Set Goal
         with st.expander("🎯 Set Goal", expanded=False):
             with st.form("goal_form", border=False):
                 g_cat = st.selectbox("Category", cats)
@@ -230,6 +232,15 @@ else:
                 if st.form_submit_button("Save Goal", use_container_width=True):
                     set_goal(st.session_state.user_id, g_cat, g_lim)
                     st.toast("Goal Saved", icon="✅")
+                    st.rerun()
+        
+        # Action 4: Delete Data
+        with st.expander("🗑️ Delete Data", expanded=False):
+            with st.form("delete_form", border=False):
+                del_id = st.number_input("ID to Delete", min_value=0, step=1)
+                if st.form_submit_button("Delete", use_container_width=True):
+                    delete_transaction(del_id)
+                    st.toast("Transaction Deleted", icon="🗑️")
                     st.rerun()
 
     # --- MAIN DASHBOARD ---
@@ -309,11 +320,13 @@ else:
         # Row 3: Recent Transactions (Full Width to avoid overlap)
         st.markdown("---")
         st.subheader("Recent Transactions")
-        grid_df = df[['date', 'description', 'category', 'amount', 'type']].head(10)
+        # Added ID column to display so users know what to delete
+        grid_df = df[['id', 'date', 'description', 'category', 'amount', 'type']].head(10)
         st.dataframe(
             grid_df,
             hide_index=True,
             column_config={
+                "id": st.column_config.NumberColumn("ID", width="small"),
                 "date": st.column_config.DateColumn("Date", format="MMM DD"),
                 "amount": st.column_config.NumberColumn("Amount", format="$%d"),
                 "type": st.column_config.TextColumn("Type"),
