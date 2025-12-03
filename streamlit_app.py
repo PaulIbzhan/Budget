@@ -68,6 +68,11 @@ st.markdown("""
             padding-bottom: 2rem;
         }
         
+        /* Restore Streamlit Menu (Hamburger) */
+        #MainMenu {visibility: visible;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        
     </style>
     """, unsafe_allow_html=True)
 
@@ -116,7 +121,6 @@ def delete_transaction(tx_id):
 
 def get_user_data(user_id):
     with sqlite3.connect(DB_FILE) as conn:
-        # Sort by Date DESC, then ID DESC to ensure newest added are always top
         df = pd.read_sql_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, id DESC", conn, params=(user_id,))
     
     if not df.empty:
@@ -229,11 +233,11 @@ else:
         # Action 2: Quick Transfer
         with st.expander("🔁 Quick Transfer", expanded=False):
             with st.form("quick_transfer", border=False):
-                # Improved Layout: Action on top, then Amount and Date side-by-side
+                st.caption("Move money between Savings and Balance")
                 t_act = st.selectbox("Action", ["Save", "Cash Out"], label_visibility="collapsed")
                 col_t1, col_t2 = st.columns(2)
                 t_val = col_t1.number_input("Amt", min_value=1.0, label_visibility="collapsed")
-                t_date = col_t2.date_input("Transfer Date", datetime.today(), label_visibility="collapsed")
+                t_date = col_t2.date_input("Date", datetime.today(), label_visibility="collapsed")
                 
                 if st.form_submit_button("Execute", use_container_width=True):
                     try:
@@ -261,7 +265,7 @@ else:
         with st.expander("🎯 Set Goal", expanded=False):
             with st.form("goal_form", border=False):
                 g_cat = st.selectbox("Category", cats)
-                g_lim = st.number_input("Limit ($)", min_value=1.0)
+                g_lim = st.number_input("Monthly Limit ($)", min_value=1.0)
                 if st.form_submit_button("Save Goal", use_container_width=True):
                     set_goal(st.session_state.user_id, g_cat, g_lim)
                     st.toast("Goal Saved", icon="✅")
@@ -281,28 +285,51 @@ else:
     c_title, c_filter = st.columns([3, 1])
     with c_title:
         st.title("Overview")
-        st.markdown(f"<div style='color: #86868B; margin-top: -15px; margin-bottom: 20px;'>{datetime.today().strftime('%B %d, %Y')}</div>", unsafe_allow_html=True)
+        # st.markdown(f"<div style='color: #86868B; margin-top: -15px; margin-bottom: 20px;'>{datetime.today().strftime('%B %d, %Y')}</div>", unsafe_allow_html=True)
     with c_filter:
-        time_range = st.selectbox("Time Period", ["All Time", "Today", "Yesterday", "This Week", "This Month", "This Year"], label_visibility="collapsed")
+        time_range = st.selectbox("Time Period", ["This Month", "All Time", "Today", "Yesterday", "This Week", "This Year", "Custom Range"], label_visibility="collapsed")
 
-    # Apply Filter
+    # Apply Filter Logic
     if not df.empty:
         today = datetime.today()
+        # Factor used to scale goals (e.g. if viewing year, multiply monthly goal by 12)
+        goal_scale_factor = 1.0 
+        
         if time_range == "Today":
             filtered_df = df[df['date'].dt.date == today.date()]
+            goal_scale_factor = 1/30
         elif time_range == "Yesterday":
             filtered_df = df[df['date'].dt.date == (today - timedelta(days=1)).date()]
+            goal_scale_factor = 1/30
         elif time_range == "This Week":
             start_week = today - timedelta(days=today.weekday())
             filtered_df = df[df['date'].dt.date >= start_week.date()]
+            goal_scale_factor = 0.25 # Approx 1 week out of 4
         elif time_range == "This Month":
             filtered_df = df[(df['date'].dt.month == today.month) & (df['date'].dt.year == today.year)]
+            goal_scale_factor = 1.0
         elif time_range == "This Year":
             filtered_df = df[df['date'].dt.year == today.year]
+            goal_scale_factor = 12.0
+        elif time_range == "Custom Range":
+            # Show Date Range Picker
+            c_d1, c_d2 = st.columns(2)
+            d_start = c_d1.date_input("Start", today - timedelta(days=30))
+            d_end = c_d2.date_input("End", today)
+            if d_start <= d_end:
+                filtered_df = df[(df['date'].dt.date >= d_start) & (df['date'].dt.date <= d_end)]
+                # Calculate scale based on number of days
+                days_diff = (d_end - d_start).days + 1
+                goal_scale_factor = days_diff / 30.0
+            else:
+                st.error("End date must be after start date.")
+                filtered_df = df
         else:
             filtered_df = df
+            goal_scale_factor = 1.0 # All Time - difficult to scale, keeping 1.0 or separate logic
     else:
         filtered_df = pd.DataFrame()
+        goal_scale_factor = 1.0
 
     if df.empty:
         st.info("No transactions yet. Add one from the sidebar.")
@@ -354,15 +381,22 @@ else:
                     
                 if not goals_df.empty:
                     st.markdown("<br>", unsafe_allow_html=True)
-                    st.subheader("Monthly Goals")
-                    this_month_mask = (df['date'].dt.month == datetime.today().month) & (df['date'].dt.year == datetime.today().year)
-                    df_month = df[this_month_mask]
-                    outflow_month_mask = df_month['type'].isin(['Expense', 'Bill', 'Debt', 'Withdrawal'])
+                    if time_range == "This Month":
+                        st.subheader("Monthly Goals")
+                    else:
+                        st.subheader(f"Goals (Scaled for {time_range})")
+                    
+                    # Filter data for goals based on selected range
+                    outflow_period_mask = filtered_df['type'].isin(['Expense', 'Bill', 'Debt', 'Withdrawal'])
                     
                     for _, row in goals_df.iterrows():
                         cat = row['category']
-                        limit = row['amount']
-                        spent = df_month[(df_month['category'] == cat) & outflow_month_mask]['amount'].sum()
+                        # Scale the monthly limit based on the time range selected
+                        limit = row['amount'] * goal_scale_factor
+                        
+                        # Calculate spend ONLY for the filtered period
+                        spent = filtered_df[(filtered_df['category'] == cat) & outflow_period_mask]['amount'].sum()
+                        
                         ratio = spent / limit if limit > 0 else 0
                         pct = min(ratio * 100, 100)
                         
