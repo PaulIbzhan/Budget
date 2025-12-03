@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import sqlite3
 import hashlib
 from datetime import datetime
@@ -67,13 +66,6 @@ st.markdown("""
         div.stButton > button:hover {
             transform: scale(1.02);
             box-shadow: 0 4px 8px rgba(0,122,255,0.3) !important;
-        }
-        
-        /* Secondary Buttons (Outlines) */
-        button[kind="secondary"] {
-            background-color: transparent !important;
-            color: #007AFF !important;
-            border: 1px solid #007AFF !important;
         }
 
         /* Inputs */
