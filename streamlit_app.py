@@ -5,46 +5,49 @@ import sqlite3
 import hashlib
 from datetime import datetime
 
-# --- 1. SETUP & APPLE-STYLE CSS ---
+# --- 1. SETUP & APPLE-STYLE DARK MODE CSS ---
 try:
     st.set_page_config(page_title="FinSight", page_icon="", layout="wide", initial_sidebar_state="expanded")
 except AttributeError:
     pass
 
-# Custom CSS for Apple Ecosystem Feel (Dark Mode Proof)
+# Custom CSS for Apple Dark Mode Feel
 st.markdown("""
     <style>
-        /* FORCE LIGHT MODE VISUALS */
+        /* FORCE DARK MODE VISUALS */
         .stApp {
-            background-color: #F5F5F7 !important;
+            background-color: #0E1117 !important;
         }
         
         /* Sidebar */
         section[data-testid="stSidebar"] {
-            background-color: #FFFFFF !important;
-            border-right: 1px solid #E5E5E5;
+            background-color: #151920 !important;
+            border-right: 1px solid #2B2B2B;
         }
         
-        /* Force Text Colors to Black/Dark Grey */
+        /* Force Text Colors to White/Light Grey */
         h1, h2, h3, h4, h5, h6, p, span, div {
-            color: #1D1D1F !important;
+            color: #FAFAFA !important;
         }
         div[data-testid="stMetricLabel"] {
-            color: #86868B !important;
+            color: #A0A0A0 !important;
+        }
+        div[data-testid="stMetricValue"] {
+            color: #FFFFFF !important;
         }
         
-        /* Cards */
+        /* Cards (Metrics, Charts, Forms) */
         div[data-testid="stMetric"], div.stDataFrame, div.stPlotlyChart, div[data-testid="stForm"] {
-            background-color: #FFFFFF !important;
+            background-color: #1E1E1E !important;
             border-radius: 18px;
             padding: 20px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.03);
-            border: 1px solid #F0F0F0;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4); /* Darker shadow for depth */
+            border: 1px solid #2B2B2B;
         }
         
-        /* Buttons */
+        /* Buttons - Apple Blue Pills */
         div.stButton > button {
-            background-color: #007AFF !important;
+            background-color: #0A84FF !important; /* Slightly brighter blue for dark mode */
             color: white !important;
             border-radius: 20px !important;
             border: none !important;
@@ -54,9 +57,9 @@ st.markdown("""
         
         /* Inputs */
         .stTextInput > div > div > input, .stNumberInput > div > div > input, .stSelectbox > div > div {
-            background-color: #FFFFFF !important;
-            color: #1D1D1F !important;
-            border: 1px solid #E5E5E5;
+            background-color: #2C2C2E !important;
+            color: #FFFFFF !important;
+            border: 1px solid #3A3A3C;
         }
         
         /* Hide Streamlit Chrome */
@@ -240,12 +243,18 @@ else:
             df['month'] = df['date'].dt.strftime('%b')
             trend = df.groupby(['month', 'type'])['amount'].sum().reset_index()
             trend = trend[trend['type'].isin(['Income', 'Expense'])]
+            
+            # Use specific colors for dark mode context
             fig = px.bar(trend, x='month', y='amount', color='type', barmode='group',
-                         color_discrete_map={'Income': '#34C759', 'Expense': '#FF3B30'})
+                         color_discrete_map={'Income': '#30D158', 'Expense': '#FF453A'})
+            
+            # Dark Mode Chart Layout
             fig.update_layout(
-                plot_bgcolor='white', paper_bgcolor='white',
+                plot_bgcolor='#1E1E1E', 
+                paper_bgcolor='#1E1E1E',
+                font=dict(color='#FAFAFA'),
                 xaxis=dict(showgrid=False, title=""),
-                yaxis=dict(showgrid=True, gridcolor='#F5F5F7', title=""),
+                yaxis=dict(showgrid=True, gridcolor='#333333', title=""),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=""),
                 margin=dict(t=30, l=0, r=0, b=0),
                 height=300
@@ -270,9 +279,14 @@ else:
             df_exp = df[outflow_mask]
             if not df_exp.empty:
                 fig_pie = px.pie(df_exp, values='amount', names='category', hole=0.7,
-                                 color_discrete_sequence=['#007AFF', '#5856D6', '#AF52DE', '#FF2D55', '#FF9500', '#FFCC00'])
-                fig_pie.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=200,
-                    annotations=[dict(text=f"${exp:,.0f}", x=0.5, y=0.5, font_size=20, showarrow=False, font=dict(color="#1D1D1F"))]
+                                 color_discrete_sequence=['#0A84FF', '#5E5CE6', '#BF5AF2', '#FF375F', '#FF9F0A', '#FFD60A'])
+                fig_pie.update_layout(
+                    showlegend=False, 
+                    margin=dict(t=0, b=0, l=0, r=0), 
+                    height=200,
+                    plot_bgcolor='#1E1E1E',
+                    paper_bgcolor='#1E1E1E',
+                    annotations=[dict(text=f"${exp:,.0f}", x=0.5, y=0.5, font_size=20, showarrow=False, font=dict(color="#FAFAFA"))]
                 )
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
