@@ -219,10 +219,15 @@ else:
                 t_act = col_t1.selectbox("Action", ["Save", "Withdraw"], label_visibility="collapsed")
                 t_val = col_t2.number_input("Amt", min_value=1.0, label_visibility="collapsed")
                 if st.form_submit_button("Execute", use_container_width=True):
-                    val = t_val if t_act == "Save" else -t_val
-                    add_transaction(st.session_state.user_id, "Savings", "Transfer", val, datetime.today(), "Quick Transfer")
-                    st.toast("Transfer Complete", icon="✅")
-                    st.rerun()
+                    # Robust Transfer Logic with Date Formatting
+                    try:
+                        val = float(t_val) if t_act == "Save" else -float(t_val)
+                        dt_str = datetime.now().strftime("%Y-%m-%d")
+                        add_transaction(st.session_state.user_id, "Savings", "Transfer", val, dt_str, "Quick Transfer")
+                        st.toast("Transfer Complete", icon="✅")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Transfer Failed: {e}")
         
         # Action 3: Set Goal
         with st.expander("🎯 Set Goal", expanded=False):
@@ -313,9 +318,27 @@ else:
                     cat = row['category']
                     limit = row['amount']
                     spent = df[(df['category'] == cat) & outflow_mask]['amount'].sum()
-                    pct = min(spent / limit, 1.0)
-                    st.caption(f"{cat} · ${spent:,.0f} / ${limit:,.0f}")
-                    st.progress(pct)
+                    ratio = spent / limit
+                    pct = min(ratio * 100, 100)
+                    
+                    # Custom Color Logic
+                    if ratio >= 1.0:
+                        bar_color = "#FF453A" # Red
+                    elif ratio >= 0.75:
+                        bar_color = "#FFD60A" # Yellow
+                    else:
+                        bar_color = "#30D158" # Green
+
+                    st.markdown(f"""
+                        <div style="margin-bottom: 5px; display: flex; justify-content: space-between; font-size: 14px; color: #A0A0A0;">
+                            <span>{cat}</span>
+                            <span>${spent:,.0f} / ${limit:,.0f}</span>
+                        </div>
+                        <div style="background-color: #2C2C2E; border-radius: 10px; height: 8px; width: 100%;">
+                            <div style="background-color: {bar_color}; width: {pct}%; height: 100%; border-radius: 10px;"></div>
+                        </div>
+                        <br>
+                    """, unsafe_allow_html=True)
 
         # Row 3: Recent Transactions (Full Width to avoid overlap)
         st.markdown("---")
