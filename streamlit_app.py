@@ -7,52 +7,42 @@ from datetime import datetime
 
 # --- 1. SETUP & APPLE-STYLE CSS ---
 try:
-    st.set_page_config(page_title="FinSight", page_icon="", layout="wide")
+    st.set_page_config(page_title="FinSight", page_icon="", layout="wide", initial_sidebar_state="expanded")
 except AttributeError:
     pass
 
-# Custom CSS for Apple Ecosystem Feel
+# Custom CSS for Apple Ecosystem Feel (Dark Mode Proof)
 st.markdown("""
     <style>
-        /* General Body */
+        /* FORCE LIGHT MODE VISUALS */
         .stApp {
-            background-color: #F5F5F7; /* Apple Light Gray Background */
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #F5F5F7 !important;
         }
         
         /* Sidebar */
         section[data-testid="stSidebar"] {
-            background-color: #FFFFFF;
+            background-color: #FFFFFF !important;
             border-right: 1px solid #E5E5E5;
         }
         
-        /* Cards (Metrics, Charts) */
-        div[data-testid="stMetric"], div.stDataFrame, div.stPlotlyChart, div[data-testid="stForm"] {
-            background-color: #FFFFFF;
-            border-radius: 18px;
-            padding: 20px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.03); /* Soft, diffused shadow */
-            border: 1px solid #F0F0F0;
-        }
-
-        /* Typography */
-        h1, h2, h3 {
-            color: #1D1D1F;
-            font-weight: 600;
-            letter-spacing: -0.5px;
+        /* Force Text Colors to Black/Dark Grey */
+        h1, h2, h3, h4, h5, h6, p, span, div {
+            color: #1D1D1F !important;
         }
         div[data-testid="stMetricLabel"] {
-            font-size: 14px;
-            color: #86868B;
-            font-weight: 500;
-        }
-        div[data-testid="stMetricValue"] {
-            font-size: 28px;
-            font-weight: 700;
-            color: #1D1D1F;
+            color: #86868B !important;
         }
         
-        /* Buttons - Apple Blue Pills */
+        /* Cards */
+        div[data-testid="stMetric"], div.stDataFrame, div.stPlotlyChart, div[data-testid="stForm"] {
+            background-color: #FFFFFF !important;
+            border-radius: 18px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+            border: 1px solid #F0F0F0;
+        }
+        
+        /* Buttons */
         div.stButton > button {
             background-color: #007AFF !important;
             color: white !important;
@@ -60,24 +50,13 @@ st.markdown("""
             border: none !important;
             padding: 10px 24px !important;
             font-weight: 500 !important;
-            box-shadow: 0 2px 5px rgba(0,122,255,0.2) !important;
-            transition: all 0.2s ease;
         }
-        div.stButton > button:hover {
-            transform: scale(1.02);
-            box-shadow: 0 4px 8px rgba(0,122,255,0.3) !important;
-        }
-
+        
         /* Inputs */
-        .stTextInput > div > div > input {
-            border-radius: 12px;
-            background-color: #F5F5F7;
-            border: 1px solid transparent;
-        }
-        .stTextInput > div > div > input:focus {
-            background-color: #FFFFFF;
-            border: 1px solid #007AFF;
-            box-shadow: 0 0 0 3px rgba(0,122,255,0.1);
+        .stTextInput > div > div > input, .stNumberInput > div > div > input, .stSelectbox > div > div {
+            background-color: #FFFFFF !important;
+            color: #1D1D1F !important;
+            border: 1px solid #E5E5E5;
         }
         
         /* Hide Streamlit Chrome */
@@ -168,14 +147,11 @@ init_db()
 # --- 3. UI VIEWS ---
 
 def login_view():
-    st.markdown("<br><br><br>", unsafe_allow_html=True) # Spacer
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
         st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>FinSight</h1>", unsafe_allow_html=True)
-        
-        # Clean Tabs
         tab1, tab2 = st.tabs(["Sign In", "Create Account"])
-        
         with tab1:
             with st.form("login_form"):
                 u = st.text_input("Username")
@@ -189,7 +165,6 @@ def login_view():
                         st.rerun()
                     else:
                         st.error("Incorrect username or password.")
-        
         with tab2:
             with st.form("register_form"):
                 nu = st.text_input("Choose Username")
@@ -208,40 +183,29 @@ if 'user_id' not in st.session_state: st.session_state.user_id = None
 if st.session_state.user_id is None:
     login_view()
 else:
-    # --- LOAD DATA ---
     df = get_user_data(st.session_state.user_id)
     goals_df = get_goals(st.session_state.user_id)
     
-    # --- SIDEBAR (Navigation & Inputs) ---
     with st.sidebar:
         st.markdown(f"### Hello, {st.session_state.username}")
         if st.button("Sign Out", key="logout"):
             st.session_state.user_id = None
             st.rerun()
-        
         st.markdown("---")
-        
-        # Add Transaction Block
         st.markdown("#### New Transaction")
         with st.form("add_tx_form", border=False):
             ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Savings"], label_visibility="collapsed")
             ft_desc = st.text_input("Description", placeholder="e.g. Starbucks")
             c_amt, c_cat = st.columns([1, 1.5])
             ft_amt = c_amt.number_input("Price", min_value=0.01, step=10.0, label_visibility="collapsed")
-            
             cats = ["Food", "Rent", "Transport", "Shopping", "Entertainment", "Health", "Salary", "Invest"]
             ft_cat = c_cat.selectbox("Category", cats, label_visibility="collapsed")
-            
             ft_date = st.date_input("Date", datetime.today(), label_visibility="collapsed")
-            
             if st.form_submit_button("Add Entry", use_container_width=True):
                 add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
                 st.toast("Entry Added", icon="✅")
                 st.rerun()
-
         st.markdown("---")
-        
-        # Goals Block
         st.markdown("#### Set Goal")
         with st.form("goal_form", border=False):
             g_cat = st.selectbox("Category", cats)
@@ -251,16 +215,12 @@ else:
                 st.toast("Goal Saved")
                 st.rerun()
 
-    # --- DASHBOARD CONTENT ---
-    
-    # 1. Header & Date
     st.title("Overview")
     st.markdown(f"<div style='color: #86868B; margin-top: -15px; margin-bottom: 20px;'>{datetime.today().strftime('%B %d, %Y')}</div>", unsafe_allow_html=True)
 
     if df.empty:
         st.info("No transactions yet. Add one from the sidebar.")
     else:
-        # 2. KPI Cards (Apple Widget Style)
         inc = df[df['type'] == 'Income']['amount'].sum()
         outflow_mask = df['type'].isin(['Expense', 'Bill'])
         exp = df[outflow_mask]['amount'].sum()
@@ -272,24 +232,16 @@ else:
         k2.metric("Expenses", f"${exp:,.0f}")
         k3.metric("Savings", f"${sav:,.0f}")
         k4.metric("Balance", f"${bal:,.0f}", delta_color="normal")
-        
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # 3. Main Analytics Area
         c_left, c_right = st.columns([2, 1])
-        
         with c_left:
             st.subheader("Activity")
-            # Clean Bar Chart
             df['month'] = df['date'].dt.strftime('%b')
             trend = df.groupby(['month', 'type'])['amount'].sum().reset_index()
-            # Filter for Chart
             trend = trend[trend['type'].isin(['Income', 'Expense'])]
-            
             fig = px.bar(trend, x='month', y='amount', color='type', barmode='group',
                          color_discrete_map={'Income': '#34C759', 'Expense': '#FF3B30'})
-            
-            # Minimalist Layout
             fig.update_layout(
                 plot_bgcolor='white', paper_bgcolor='white',
                 xaxis=dict(showgrid=False, title=""),
@@ -300,10 +252,7 @@ else:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # Recent Transactions Table
             st.subheader("Recent")
-            
-            # Custom styled dataframe via st.dataframe configuration
             grid_df = df[['date', 'description', 'category', 'amount', 'type']].head(5)
             st.dataframe(
                 grid_df,
@@ -318,16 +267,12 @@ else:
 
         with c_right:
             st.subheader("Breakdown")
-            # Donut Chart
             df_exp = df[outflow_mask]
             if not df_exp.empty:
                 fig_pie = px.pie(df_exp, values='amount', names='category', hole=0.7,
                                  color_discrete_sequence=['#007AFF', '#5856D6', '#AF52DE', '#FF2D55', '#FF9500', '#FFCC00'])
-                fig_pie.update_layout(
-                    showlegend=False, 
-                    margin=dict(t=0, b=0, l=0, r=0), 
-                    height=200,
-                    annotations=[dict(text=f"${exp:,.0f}", x=0.5, y=0.5, font_size=20, showarrow=False)]
+                fig_pie.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=200,
+                    annotations=[dict(text=f"${exp:,.0f}", x=0.5, y=0.5, font_size=20, showarrow=False, font=dict(color="#1D1D1F"))]
                 )
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
@@ -340,13 +285,11 @@ else:
                     limit = row['amount']
                     spent = df[(df['category'] == cat) & outflow_mask]['amount'].sum()
                     pct = min(spent / limit, 1.0)
-                    
                     st.caption(f"{cat} · ${spent:,.0f} / ${limit:,.0f}")
                     st.progress(pct)
             else:
                 st.caption("No goals set.")
                 
-            # Quick Transfer Mini-Tool
             st.markdown("---")
             st.subheader("Transfer")
             with st.form("quick_transfer", border=False):
