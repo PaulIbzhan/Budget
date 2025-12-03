@@ -78,57 +78,50 @@ st.markdown("""
 
 DB_FILE = 'budget_v3.db'
 
-# --- 2. DATABASE FUNCTIONS ---
+# --- 2. DATABASE FUNCTIONS (Robust Context Managers) ---
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, category TEXT, amount REAL, date TEXT, description TEXT, FOREIGN KEY(user_id) REFERENCES users(id))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, category TEXT, amount REAL, FOREIGN KEY(user_id) REFERENCES users(id))''')
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, category TEXT, amount REAL, date TEXT, description TEXT, FOREIGN KEY(user_id) REFERENCES users(id))''')
+        c.execute('''CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, category TEXT, amount REAL, FOREIGN KEY(user_id) REFERENCES users(id))''')
+        conn.commit()
 
 def make_hash(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def register_user(username, password):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
     try:
-        c.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, make_hash(password)))
-        conn.commit()
-        return True
+        with sqlite3.connect(DB_FILE) as conn:
+            c = conn.cursor()
+            c.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, make_hash(password)))
+            conn.commit()
+            return True
     except:
         return False
-    finally:
-        conn.close()
 
 def login_user(username, password):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('SELECT id, username FROM users WHERE username = ? AND password = ?', (username, make_hash(password)))
-    data = c.fetchone()
-    conn.close()
-    return data
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute('SELECT id, username FROM users WHERE username = ? AND password = ?', (username, make_hash(password)))
+        return c.fetchone()
 
 def add_transaction(user_id, type_, category, amount, date, description):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''INSERT INTO transactions (user_id, type, category, amount, date, description) VALUES (?, ?, ?, ?, ?, ?)''', (user_id, type_, category, amount, date, description))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute('''INSERT INTO transactions (user_id, type, category, amount, date, description) VALUES (?, ?, ?, ?, ?, ?)''', (user_id, type_, category, amount, date, description))
+        conn.commit()
 
 def delete_transaction(tx_id):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
+        conn.commit()
 
 def get_user_data(user_id):
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC", conn, params=(user_id,))
-    conn.close()
+    with sqlite3.connect(DB_FILE) as conn:
+        df = pd.read_sql_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC", conn, params=(user_id,))
+    
     if not df.empty:
         # FIX: coercing errors handles bad date formats gracefully
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
@@ -136,22 +129,19 @@ def get_user_data(user_id):
     return df
 
 def set_goal(user_id, category, amount):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT id FROM goals WHERE user_id = ? AND category = ?", (user_id, category))
-    data = c.fetchone()
-    if data:
-        c.execute("UPDATE goals SET amount = ? WHERE id = ?", (amount, data[0]))
-    else:
-        c.execute("INSERT INTO goals (user_id, category, amount) VALUES (?, ?, ?)", (user_id, category, amount))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("SELECT id FROM goals WHERE user_id = ? AND category = ?", (user_id, category))
+        data = c.fetchone()
+        if data:
+            c.execute("UPDATE goals SET amount = ? WHERE id = ?", (amount, data[0]))
+        else:
+            c.execute("INSERT INTO goals (user_id, category, amount) VALUES (?, ?, ?)", (user_id, category, amount))
+        conn.commit()
 
 def get_goals(user_id):
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT category, amount FROM goals WHERE user_id = ?", conn, params=(user_id,))
-    conn.close()
-    return df
+    with sqlite3.connect(DB_FILE) as conn:
+        return pd.read_sql_query("SELECT category, amount FROM goals WHERE user_id = ?", conn, params=(user_id,))
 
 init_db()
 
@@ -159,7 +149,6 @@ init_db()
 
 def login_view():
     st.markdown("<br><br>", unsafe_allow_html=True)
-    # ALIGNMENT FIX: Widened center column for better login form layout
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>FinSight</h1>", unsafe_allow_html=True)
@@ -198,35 +187,52 @@ else:
     df = get_user_data(st.session_state.user_id)
     goals_df = get_goals(st.session_state.user_id)
     
+    # --- SIDEBAR: ALL ACTIONS HERE (Fixes Overlap) ---
     with st.sidebar:
         st.markdown(f"### Hello, {st.session_state.username}")
         if st.button("Sign Out", key="logout"):
             st.session_state.user_id = None
             st.rerun()
         st.markdown("---")
-        st.markdown("#### New Transaction")
-        with st.form("add_tx_form", border=False):
-            ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Savings"], label_visibility="collapsed")
-            ft_desc = st.text_input("Description", placeholder="e.g. Starbucks")
-            c_amt, c_cat = st.columns([1, 1.5])
-            ft_amt = c_amt.number_input("Price", min_value=0.01, step=10.0, label_visibility="collapsed")
-            cats = ["Food", "Rent", "Transport", "Shopping", "Entertainment", "Health", "Salary", "Invest"]
-            ft_cat = c_cat.selectbox("Category", cats, label_visibility="collapsed")
-            ft_date = st.date_input("Date", datetime.today(), label_visibility="collapsed")
-            if st.form_submit_button("Add Entry", use_container_width=True):
-                add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
-                st.toast("Entry Added", icon="✅")
-                st.rerun()
-        st.markdown("---")
-        st.markdown("#### Set Goal")
-        with st.form("goal_form", border=False):
-            g_cat = st.selectbox("Category", cats)
-            g_lim = st.number_input("Limit ($)", min_value=1.0)
-            if st.form_submit_button("Save Goal", use_container_width=True):
-                set_goal(st.session_state.user_id, g_cat, g_lim)
-                st.toast("Goal Saved")
-                st.rerun()
+        
+        # Action 1: Add Transaction
+        with st.expander("➕ New Transaction", expanded=True):
+            with st.form("add_tx_form", border=False):
+                ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Savings"], label_visibility="collapsed")
+                ft_desc = st.text_input("Description", placeholder="e.g. Starbucks")
+                c_amt, c_cat = st.columns([1, 1.5])
+                ft_amt = c_amt.number_input("Price", min_value=0.01, step=10.0, label_visibility="collapsed")
+                cats = ["Food", "Rent", "Transport", "Shopping", "Entertainment", "Health", "Salary", "Invest"]
+                ft_cat = c_cat.selectbox("Category", cats, label_visibility="collapsed")
+                ft_date = st.date_input("Date", datetime.today(), label_visibility="collapsed")
+                if st.form_submit_button("Add Entry", use_container_width=True):
+                    add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
+                    st.toast("Entry Added", icon="✅")
+                    st.rerun()
 
+        # Action 2: Quick Transfer
+        with st.expander("🔁 Quick Transfer", expanded=False):
+            with st.form("quick_transfer", border=False):
+                col_t1, col_t2 = st.columns(2)
+                t_act = col_t1.selectbox("Action", ["Save", "Withdraw"], label_visibility="collapsed")
+                t_val = col_t2.number_input("Amt", min_value=1.0, label_visibility="collapsed")
+                if st.form_submit_button("Execute", use_container_width=True):
+                    val = t_val if t_act == "Save" else -t_val
+                    add_transaction(st.session_state.user_id, "Savings", "Transfer", val, datetime.today(), "Quick Transfer")
+                    st.toast("Transfer Complete", icon="✅")
+                    st.rerun()
+        
+        # Action 3: Goals
+        with st.expander("🎯 Set Goal", expanded=False):
+            with st.form("goal_form", border=False):
+                g_cat = st.selectbox("Category", cats)
+                g_lim = st.number_input("Limit ($)", min_value=1.0)
+                if st.form_submit_button("Save Goal", use_container_width=True):
+                    set_goal(st.session_state.user_id, g_cat, g_lim)
+                    st.toast("Goal Saved", icon="✅")
+                    st.rerun()
+
+    # --- MAIN DASHBOARD ---
     st.title("Overview")
     st.markdown(f"<div style='color: #86868B; margin-top: -15px; margin-bottom: 20px;'>{datetime.today().strftime('%B %d, %Y')}</div>", unsafe_allow_html=True)
 
@@ -239,7 +245,7 @@ else:
         sav = df[df['type'] == 'Savings']['amount'].sum()
         bal = inc - (exp + sav)
         
-        # ALIGNMENT FIX: Balanced grid
+        # Row 1: Metrics
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Income", f"${inc:,.0f}")
         k2.metric("Expenses", f"${exp:,.0f}")
@@ -247,7 +253,7 @@ else:
         k4.metric("Balance", f"${bal:,.0f}", delta_color="normal")
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ALIGNMENT FIX: Adjusted ratio to 2:1 for cleaner chart vs list balance
+        # Row 2: Charts (2/3 Bar, 1/3 Pie)
         c_left, c_right = st.columns([2, 1])
         with c_left:
             st.subheader("Activity")
@@ -255,11 +261,9 @@ else:
             trend = df.groupby(['month', 'type'])['amount'].sum().reset_index()
             trend = trend[trend['type'].isin(['Income', 'Expense'])]
             
-            # Use specific colors for dark mode context
             fig = px.bar(trend, x='month', y='amount', color='type', barmode='group',
                          color_discrete_map={'Income': '#30D158', 'Expense': '#FF453A'})
             
-            # Dark Mode Chart Layout
             fig.update_layout(
                 plot_bgcolor='#1E1E1E', 
                 paper_bgcolor='#1E1E1E',
@@ -271,19 +275,6 @@ else:
                 height=300
             )
             st.plotly_chart(fig, use_container_width=True)
-
-            st.subheader("Recent")
-            grid_df = df[['date', 'description', 'category', 'amount', 'type']].head(5)
-            st.dataframe(
-                grid_df,
-                hide_index=True,
-                column_config={
-                    "date": st.column_config.DateColumn("Date", format="MMM DD"),
-                    "amount": st.column_config.NumberColumn("Amount", format="$%d"),
-                    "type": st.column_config.TextColumn("Type"),
-                },
-                use_container_width=True
-            )
 
         with c_right:
             st.subheader("Breakdown")
@@ -302,9 +293,11 @@ else:
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.caption("No expenses.")
-
-            st.subheader("Goals")
+                
+            # Goals moved here, cleaner look
             if not goals_df.empty:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.subheader("Goals")
                 for _, row in goals_df.iterrows():
                     cat = row['category']
                     limit = row['amount']
@@ -312,17 +305,18 @@ else:
                     pct = min(spent / limit, 1.0)
                     st.caption(f"{cat} · ${spent:,.0f} / ${limit:,.0f}")
                     st.progress(pct)
-            else:
-                st.caption("No goals set.")
-                
-            st.markdown("---")
-            st.subheader("Transfer")
-            with st.form("quick_transfer", border=False):
-                col_t1, col_t2 = st.columns(2)
-                t_act = col_t1.selectbox("Action", ["Save", "Withdraw"], label_visibility="collapsed")
-                t_val = col_t2.number_input("Amt", min_value=1.0, label_visibility="collapsed")
-                if st.form_submit_button("Execute", use_container_width=True):
-                    val = t_val if t_act == "Save" else -t_val
-                    add_transaction(st.session_state.user_id, "Savings", "Transfer", val, datetime.today(), "Quick Transfer")
-                    st.toast("Transfer Complete")
-                    st.rerun()
+
+        # Row 3: Recent Transactions (Full Width to avoid overlap)
+        st.markdown("---")
+        st.subheader("Recent Transactions")
+        grid_df = df[['date', 'description', 'category', 'amount', 'type']].head(10)
+        st.dataframe(
+            grid_df,
+            hide_index=True,
+            column_config={
+                "date": st.column_config.DateColumn("Date", format="MMM DD"),
+                "amount": st.column_config.NumberColumn("Amount", format="$%d"),
+                "type": st.column_config.TextColumn("Type"),
+            },
+            use_container_width=True
+        )
