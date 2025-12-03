@@ -1,32 +1,98 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import sqlite3
 import hashlib
 from datetime import datetime
 
-# --- 1. SETUP & ERROR HANDLING ---
-# We wrap this in a try-except block to catch the specific error you are seeing.
+# --- 1. SETUP & APPLE-STYLE CSS ---
 try:
-    # This must be the very first Streamlit command
-    st.set_page_config(page_title="FinSight Pro", page_icon="💳", layout="wide")
-except AttributeError as e:
-    # This block runs ONLY if you have the "circular import" error
-    if "partially initialized module 'streamlit'" in str(e):
-        st.error("⚠️ CRITICAL ERROR DETECTED ⚠️")
-        st.error("You have a file named 'streamlit.py' in your folder.")
-        st.warning("Please DELETE or RENAME the file 'streamlit.py' in this directory: C:\\Users\\91979\\Desktop\\... (or wherever you saved this script).")
-        st.stop()
-    else:
-        raise e
+    st.set_page_config(page_title="FinSight", page_icon="", layout="wide")
+except AttributeError:
+    pass
 
-# Clean, Minimalist UI Styling
+# Custom CSS for Apple Ecosystem Feel
 st.markdown("""
     <style>
-        .block-container { padding-top: 2rem; }
-        div[data-testid="stMetricValue"] { font-size: 24px; font-weight: 700; }
+        /* General Body */
+        .stApp {
+            background-color: #F5F5F7; /* Apple Light Gray Background */
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+        
+        /* Sidebar */
+        section[data-testid="stSidebar"] {
+            background-color: #FFFFFF;
+            border-right: 1px solid #E5E5E5;
+        }
+        
+        /* Cards (Metrics, Charts) */
+        div[data-testid="stMetric"], div.stDataFrame, div.stPlotlyChart, div[data-testid="stForm"] {
+            background-color: #FFFFFF;
+            border-radius: 18px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.03); /* Soft, diffused shadow */
+            border: 1px solid #F0F0F0;
+        }
+
+        /* Typography */
+        h1, h2, h3 {
+            color: #1D1D1F;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+        div[data-testid="stMetricLabel"] {
+            font-size: 14px;
+            color: #86868B;
+            font-weight: 500;
+        }
+        div[data-testid="stMetricValue"] {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1D1D1F;
+        }
+        
+        /* Buttons - Apple Blue Pills */
+        div.stButton > button {
+            background-color: #007AFF !important;
+            color: white !important;
+            border-radius: 20px !important;
+            border: none !important;
+            padding: 10px 24px !important;
+            font-weight: 500 !important;
+            box-shadow: 0 2px 5px rgba(0,122,255,0.2) !important;
+            transition: all 0.2s ease;
+        }
+        div.stButton > button:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 8px rgba(0,122,255,0.3) !important;
+        }
+        
+        /* Secondary Buttons (Outlines) */
+        button[kind="secondary"] {
+            background-color: transparent !important;
+            color: #007AFF !important;
+            border: 1px solid #007AFF !important;
+        }
+
+        /* Inputs */
+        .stTextInput > div > div > input {
+            border-radius: 12px;
+            background-color: #F5F5F7;
+            border: 1px solid transparent;
+        }
+        .stTextInput > div > div > input:focus {
+            background-color: #FFFFFF;
+            border: 1px solid #007AFF;
+            box-shadow: 0 0 0 3px rgba(0,122,255,0.1);
+        }
+        
+        /* Hide Streamlit Chrome */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
+        header {visibility: hidden;}
+        
     </style>
     """, unsafe_allow_html=True)
 
@@ -34,34 +100,11 @@ DB_FILE = 'budget_v3.db'
 
 # --- 2. DATABASE FUNCTIONS ---
 def init_db():
-    """Initializes the database with necessary tables."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    
-    # User Table
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  username TEXT UNIQUE, 
-                  password TEXT)''')
-    
-    # Transactions Table
-    c.execute('''CREATE TABLE IF NOT EXISTS transactions
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  user_id INTEGER, 
-                  type TEXT, 
-                  category TEXT, 
-                  amount REAL, 
-                  date TEXT, 
-                  description TEXT,
-                  FOREIGN KEY(user_id) REFERENCES users(id))''')
-    
-    # Goals Table
-    c.execute('''CREATE TABLE IF NOT EXISTS goals
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  user_id INTEGER,
-                  category TEXT,
-                  amount REAL,
-                  FOREIGN KEY(user_id) REFERENCES users(id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, category TEXT, amount REAL, date TEXT, description TEXT, FOREIGN KEY(user_id) REFERENCES users(id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, category TEXT, amount REAL, FOREIGN KEY(user_id) REFERENCES users(id))''')
     conn.commit()
     conn.close()
 
@@ -75,7 +118,7 @@ def register_user(username, password):
         c.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, make_hash(password)))
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except:
         return False
     finally:
         conn.close()
@@ -83,8 +126,7 @@ def register_user(username, password):
 def login_user(username, password):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('SELECT id, username FROM users WHERE username = ? AND password = ?', 
-              (username, make_hash(password)))
+    c.execute('SELECT id, username FROM users WHERE username = ? AND password = ?', (username, make_hash(password)))
     data = c.fetchone()
     conn.close()
     return data
@@ -92,9 +134,7 @@ def login_user(username, password):
 def add_transaction(user_id, type_, category, amount, date, description):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('''INSERT INTO transactions (user_id, type, category, amount, date, description) 
-                 VALUES (?, ?, ?, ?, ?, ?)''', 
-              (user_id, type_, category, amount, date, description))
+    c.execute('''INSERT INTO transactions (user_id, type, category, amount, date, description) VALUES (?, ?, ?, ?, ?, ?)''', (user_id, type_, category, amount, date, description))
     conn.commit()
     conn.close()
 
@@ -107,7 +147,6 @@ def delete_transaction(tx_id):
 
 def get_user_data(user_id):
     conn = sqlite3.connect(DB_FILE)
-    # Automatically sort by Date Descending (Newest first)
     df = pd.read_sql_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC", conn, params=(user_id,))
     conn.close()
     if not df.empty:
@@ -132,198 +171,198 @@ def get_goals(user_id):
     conn.close()
     return df
 
-# Initialize DB on load
 init_db()
 
-# --- 3. AUTHENTICATION & LOGIN ---
-if 'user_id' not in st.session_state:
-    st.session_state.user_id = None
-if 'username' not in st.session_state:
-    st.session_state.username = None
+# --- 3. UI VIEWS ---
 
 def login_view():
-    c1, c2, c3 = st.columns([1, 1, 1])
+    st.markdown("<br><br><br>", unsafe_allow_html=True) # Spacer
+    c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
-        st.title("FinSight Pro")
-        st.write("Personal Finance Dashboard")
+        st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>FinSight</h1>", unsafe_allow_html=True)
         
-        tab1, tab2 = st.tabs(["Login", "Register"])
+        # Clean Tabs
+        tab1, tab2 = st.tabs(["Sign In", "Create Account"])
+        
         with tab1:
-            u = st.text_input("Username")
-            p = st.text_input("Password", type="password")
-            if st.button("Sign In", type="primary", use_container_width=True):
-                user = login_user(u, p)
-                if user:
-                    st.session_state.user_id = user[0]
-                    st.session_state.username = user[1]
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials")
+            with st.form("login_form"):
+                u = st.text_input("Username")
+                p = st.text_input("Password", type="password")
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.form_submit_button("Sign In", use_container_width=True):
+                    user = login_user(u, p)
+                    if user:
+                        st.session_state.user_id = user[0]
+                        st.session_state.username = user[1]
+                        st.rerun()
+                    else:
+                        st.error("Incorrect username or password.")
+        
         with tab2:
-            nu = st.text_input("New Username")
-            np = st.text_input("New Password", type="password")
-            if st.button("Create Account", use_container_width=True):
-                if register_user(nu, np):
-                    st.success("Account created! Please Login.")
-                else:
-                    st.error("Username taken.")
+            with st.form("register_form"):
+                nu = st.text_input("Choose Username")
+                np = st.text_input("Choose Password", type="password")
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.form_submit_button("Create ID", use_container_width=True):
+                    if register_user(nu, np):
+                        st.success("ID Created. You can now sign in.")
+                    else:
+                        st.error("Username unavailable.")
 
-# --- 4. MAIN APPLICATION ---
+# --- 4. MAIN APP ---
+
+if 'user_id' not in st.session_state: st.session_state.user_id = None
+
 if st.session_state.user_id is None:
     login_view()
 else:
-    # --- DATA LOADING ---
+    # --- LOAD DATA ---
     df = get_user_data(st.session_state.user_id)
     goals_df = get_goals(st.session_state.user_id)
-
-    # --- SIDEBAR ---
+    
+    # --- SIDEBAR (Navigation & Inputs) ---
     with st.sidebar:
-        st.subheader(f"👤 {st.session_state.username}")
-        if st.button("Logout"):
+        st.markdown(f"### Hello, {st.session_state.username}")
+        if st.button("Sign Out", key="logout"):
             st.session_state.user_id = None
             st.rerun()
+        
         st.markdown("---")
-
-        # 1. ADD TRANSACTION
-        st.subheader("➕ New Transaction")
-        with st.form("tx_form", border=True):
-            tx_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Debt", "Savings"])
+        
+        # Add Transaction Block
+        st.markdown("#### New Transaction")
+        with st.form("add_tx_form", border=False):
+            ft_type = st.selectbox("Type", ["Expense", "Income", "Bill", "Savings"], label_visibility="collapsed")
+            ft_desc = st.text_input("Description", placeholder="e.g. Starbucks")
+            c_amt, c_cat = st.columns([1, 1.5])
+            ft_amt = c_amt.number_input("Price", min_value=0.01, step=10.0, label_visibility="collapsed")
             
-            # Smart Categories
-            if tx_type == "Income":
-                cats = ["Salary", "Freelance", "Investment", "Other"]
-            elif tx_type == "Savings":
-                cats = ["Emergency Fund", "Retirement", "Vacation", "General"]
-            else:
-                cats = ["Food", "Rent", "Utilities", "Transport", "Shopping", "Entertainment", "Healthcare", "General"]
+            cats = ["Food", "Rent", "Transport", "Shopping", "Entertainment", "Health", "Salary", "Invest"]
+            ft_cat = c_cat.selectbox("Category", cats, label_visibility="collapsed")
             
-            tx_cat = st.selectbox("Category", cats)
-            tx_desc = st.text_input("Description")
-            tx_amount = st.number_input("Amount ($)", min_value=0.01)
-            tx_date = st.date_input("Date", datetime.today())
+            ft_date = st.date_input("Date", datetime.today(), label_visibility="collapsed")
             
-            if st.form_submit_button("Add Record", type="primary", use_container_width=True):
-                add_transaction(st.session_state.user_id, tx_type, tx_cat, tx_amount, tx_date, tx_desc)
-                st.toast("Transaction Added!")
+            if st.form_submit_button("Add Entry", use_container_width=True):
+                add_transaction(st.session_state.user_id, ft_type, ft_cat, ft_amt, ft_date, ft_desc)
+                st.toast("Entry Added", icon="✅")
                 st.rerun()
 
         st.markdown("---")
+        
+        # Goals Block
+        st.markdown("#### Set Goal")
+        with st.form("goal_form", border=False):
+            g_cat = st.selectbox("Category", cats)
+            g_lim = st.number_input("Limit ($)", min_value=1.0)
+            if st.form_submit_button("Save Goal", use_container_width=True):
+                set_goal(st.session_state.user_id, g_cat, g_lim)
+                st.toast("Goal Saved")
+                st.rerun()
 
-        # 2. SET GOALS
-        with st.expander("🎯 Set Budget Goal"):
-            with st.form("goal_form"):
-                g_cat = st.selectbox("Category", ["Food", "Rent", "Utilities", "Transport", "Shopping", "Entertainment", "Healthcare", "General"])
-                g_lim = st.number_input("Monthly Limit ($)", min_value=1.0)
-                if st.form_submit_button("Set Goal"):
-                    set_goal(st.session_state.user_id, g_cat, g_lim)
-                    st.toast("Goal Updated!")
-                    st.rerun()
+    # --- DASHBOARD CONTENT ---
+    
+    # 1. Header & Date
+    st.title("Overview")
+    st.markdown(f"<div style='color: #86868B; margin-top: -15px; margin-bottom: 20px;'>{datetime.today().strftime('%B %d, %Y')}</div>", unsafe_allow_html=True)
 
-    # --- MAIN DASHBOARD ---
     if df.empty:
-        st.info("👋 Welcome! Add your first transaction in the sidebar to get started.")
+        st.info("No transactions yet. Add one from the sidebar.")
     else:
-        # --- KEY METRICS ---
+        # 2. KPI Cards (Apple Widget Style)
         inc = df[df['type'] == 'Income']['amount'].sum()
-        sav = df[df['type'] == 'Savings']['amount'].sum()
-        # Calculate 'Outflow' (Expenses + Bills + Debt)
-        outflow_mask = df['type'].isin(['Expense', 'Bill', 'Debt'])
+        outflow_mask = df['type'].isin(['Expense', 'Bill'])
         exp = df[outflow_mask]['amount'].sum()
-        
+        sav = df[df['type'] == 'Savings']['amount'].sum()
         bal = inc - (exp + sav)
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Net Income", f"${inc:,.0f}")
-        k2.metric("Total Expenses", f"${exp:,.0f}")
-        k3.metric("Total Savings", f"${sav:,.0f}")
-        k4.metric("Balance", f"${bal:,.0f}", delta_color="normal" if bal >= 0 else "inverse")
         
-        st.markdown("---")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Income", f"${inc:,.0f}")
+        k2.metric("Expenses", f"${exp:,.0f}")
+        k3.metric("Savings", f"${sav:,.0f}")
+        k4.metric("Balance", f"${bal:,.0f}", delta_color="normal")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        # --- TABS ---
-        tab1, tab2, tab3 = st.tabs(["📊 Analytics", "📉 Trends", "🛠️ Manage"])
-
-        with tab1:
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.subheader("Where did the money go?")
-                df_out = df[outflow_mask]
-                if not df_out.empty:
-                    fig_pie = px.pie(df_out, values='amount', names='category', hole=0.5,
-                                     color_discrete_sequence=px.colors.qualitative.Pastel)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                else:
-                    st.caption("No expenses recorded yet.")
-
-            with c2:
-                st.subheader("Budget Goals")
-                if not goals_df.empty:
-                    for _, row in goals_df.iterrows():
-                        cat = row['category']
-                        limit = row['amount']
-                        # Calculate actual spending for this category
-                        spent = df[(df['category'] == cat) & outflow_mask]['amount'].sum()
-                        pct = min(spent / limit, 1.0)
-                        
-                        st.write(f"**{cat}**")
-                        st.progress(pct)
-                        st.caption(f"${spent:,.0f} / ${limit:,.0f}")
-                else:
-                    st.caption("Set goals in the sidebar.")
-
-        with tab2:
-            st.subheader("Income vs Expenses Over Time")
-            df['month'] = df['date'].dt.to_period('M').astype(str)
-            
-            # Aggregate data
+        # 3. Main Analytics Area
+        c_left, c_right = st.columns([2, 1])
+        
+        with c_left:
+            st.subheader("Activity")
+            # Clean Bar Chart
+            df['month'] = df['date'].dt.strftime('%b')
             trend = df.groupby(['month', 'type'])['amount'].sum().reset_index()
-            trend['kind'] = trend['type'].apply(lambda x: 'Income' if x == 'Income' else 'Expense')
+            # Filter for Chart
+            trend = trend[trend['type'].isin(['Income', 'Expense'])]
             
-            # Simple Bar Chart
-            fig_bar = px.bar(trend, x='month', y='amount', color='kind', barmode='group',
-                             color_discrete_map={'Income': '#4ade80', 'Expense': '#f87171'})
-            st.plotly_chart(fig_bar, use_container_width=True)
+            fig = px.bar(trend, x='month', y='amount', color='type', barmode='group',
+                         color_discrete_map={'Income': '#34C759', 'Expense': '#FF3B30'})
+            
+            # Minimalist Layout
+            fig.update_layout(
+                plot_bgcolor='white', paper_bgcolor='white',
+                xaxis=dict(showgrid=False, title=""),
+                yaxis=dict(showgrid=True, gridcolor='#F5F5F7', title=""),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=""),
+                margin=dict(t=30, l=0, r=0, b=0),
+                height=300
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-        with tab3:
-            # TRANSFER TOOL
-            st.subheader("🔁 Quick Transfer")
-            with st.container(border=True):
-                tc1, tc2, tc3 = st.columns([2, 2, 1])
-                with tc1:
-                    t_dir = st.selectbox("Direction", ["To Savings", "To Balance"])
-                with tc2:
-                    t_amt = st.number_input("Transfer Amount", min_value=1.0)
-                with tc3:
-                    st.write("")
-                    st.write("")
-                    if st.button("Transfer", type="primary", use_container_width=True):
-                        today = datetime.today()
-                        if t_dir == "To Savings":
-                            add_transaction(st.session_state.user_id, "Savings", "Transfer", t_amt, today, "Manual Transfer")
-                            st.toast(f"Moved ${t_amt} to Savings")
-                        else:
-                            # Negative Savings = Moving back to Balance
-                            add_transaction(st.session_state.user_id, "Savings", "Transfer", -t_amt, today, "Manual Transfer")
-                            st.toast(f"Moved ${t_amt} to Balance")
-                        st.rerun()
-
-            st.markdown("### Transaction History")
-            # Editable Grid (Auto-sorted by date in query)
-            edited_df = st.data_editor(
-                df[['id', 'date', 'type', 'category', 'description', 'amount']],
+            # Recent Transactions Table
+            st.subheader("Recent")
+            
+            # Custom styled dataframe via st.dataframe configuration
+            grid_df = df[['date', 'description', 'category', 'amount', 'type']].head(5)
+            st.dataframe(
+                grid_df,
                 hide_index=True,
                 column_config={
-                    "id": st.column_config.NumberColumn("ID", disabled=True),
-                    "amount": st.column_config.NumberColumn("Amount", format="$%.2f"),
-                    "date": st.column_config.DateColumn("Date")
+                    "date": st.column_config.DateColumn("Date", format="MMM DD"),
+                    "amount": st.column_config.NumberColumn("Amount", format="$%d"),
+                    "type": st.column_config.TextColumn("Type"),
                 },
                 use_container_width=True
             )
-            
-            with st.expander("Delete Record"):
-                col_d1, col_d2 = st.columns([1, 4])
-                del_id = col_d1.number_input("ID to Delete", min_value=0, step=1)
-                if col_d2.button("Delete Transaction"):
-                    delete_transaction(del_id)
-                    st.toast("Deleted successfully")
+
+        with c_right:
+            st.subheader("Breakdown")
+            # Donut Chart
+            df_exp = df[outflow_mask]
+            if not df_exp.empty:
+                fig_pie = px.pie(df_exp, values='amount', names='category', hole=0.7,
+                                 color_discrete_sequence=['#007AFF', '#5856D6', '#AF52DE', '#FF2D55', '#FF9500', '#FFCC00'])
+                fig_pie.update_layout(
+                    showlegend=False, 
+                    margin=dict(t=0, b=0, l=0, r=0), 
+                    height=200,
+                    annotations=[dict(text=f"${exp:,.0f}", x=0.5, y=0.5, font_size=20, showarrow=False)]
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.caption("No expenses.")
+
+            st.subheader("Goals")
+            if not goals_df.empty:
+                for _, row in goals_df.iterrows():
+                    cat = row['category']
+                    limit = row['amount']
+                    spent = df[(df['category'] == cat) & outflow_mask]['amount'].sum()
+                    pct = min(spent / limit, 1.0)
+                    
+                    st.caption(f"{cat} · ${spent:,.0f} / ${limit:,.0f}")
+                    st.progress(pct)
+            else:
+                st.caption("No goals set.")
+                
+            # Quick Transfer Mini-Tool
+            st.markdown("---")
+            st.subheader("Transfer")
+            with st.form("quick_transfer", border=False):
+                col_t1, col_t2 = st.columns(2)
+                t_act = col_t1.selectbox("Action", ["Save", "Withdraw"], label_visibility="collapsed")
+                t_val = col_t2.number_input("Amt", min_value=1.0, label_visibility="collapsed")
+                if st.form_submit_button("Execute", use_container_width=True):
+                    val = t_val if t_act == "Save" else -t_val
+                    add_transaction(st.session_state.user_id, "Savings", "Transfer", val, datetime.today(), "Quick Transfer")
+                    st.toast("Transfer Complete")
                     st.rerun()
